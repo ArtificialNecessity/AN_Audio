@@ -235,7 +235,9 @@ internal static unsafe class WasapiInterop
         return fn(renderClient, numFramesWritten, flags);
     }
 
-    // ─── Win32 PInvoke ───────────────────────────────────────────────────
+    // ─── Win32 PInvoke ───────────────────────────────────────────────────────────
+
+#pragma warning disable AN0100 // nint is intentional for COM/Win32 interop
 
     [DllImport("ole32.dll")]
     public static extern int CoCreateInstance(
@@ -264,4 +266,6 @@ internal static unsafe class WasapiInterop
     public const uint WAIT_OBJECT_0 = 0;
     public const uint COINIT_MULTITHREADED = 0;
     public const uint AUDCLNT_BUFFERFLAGS_SILENT = 0x2;
+
+#pragma warning restore AN0100
 }

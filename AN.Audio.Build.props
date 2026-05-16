@@ -16,7 +16,7 @@
 
   <PropertyGroup>
     <!-- ── Dependency versions (edit here, all projects pick them up) ── -->
-    <ANCodeAnalyzersVersion>0.1.19</ANCodeAnalyzersVersion>
+    <ANCodeAnalyzersVersion>0.1.21</ANCodeAnalyzersVersion>
   </PropertyGroup>
 
   <PropertyGroup>
