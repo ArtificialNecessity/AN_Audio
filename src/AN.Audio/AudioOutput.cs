@@ -10,6 +10,15 @@ namespace AN.Audio;
 public static class AudioOutput
 {
     /// <summary>
+    /// Returns true if the current platform has a working audio backend.
+    /// Use this to gracefully degrade on platforms where audio is not yet implemented.
+    /// </summary>
+    public static bool IsAvailable =>
+        RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+        // || RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
+        // || RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+
+    /// <summary>
     /// Create the platform-appropriate audio output.
     /// </summary>
     /// <param name="format">Desired PCM format.</param>

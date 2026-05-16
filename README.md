@@ -1,5 +1,10 @@
 # AN.Audio
 
+https://github.com/ArtificialNecessity/AN_Audio
+
+(C)opyright David Jeske 2026. Coded with Opus 4.6.
+Released under Apache 2.0 for all to share and enjoy.
+
 Cross-platform audio playback for .NET via direct PInvoke to native OS APIs. A single managed DLL — no native binaries to bundle, no NuGet packages with precompiled C blobs, no runtime dependencies beyond the operating system itself.
 
 ## Why
