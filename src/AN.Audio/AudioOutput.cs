@@ -14,9 +14,10 @@ public static class AudioOutput
     /// Use this to gracefully degrade on platforms where audio is not yet implemented.
     /// </summary>
     public static bool IsAvailable =>
-        RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+        RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+        || RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+        // Future:
         // || RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
-        // || RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
 
     /// <summary>
     /// Create the platform-appropriate audio output.
