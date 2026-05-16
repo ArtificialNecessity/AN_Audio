@@ -1,0 +1,18 @@
+# Build artifacts
+artifacts/
+bin/
+obj/
+
+# Generated version props (regenerate via: ./cmd/gen-version-file.ps1)
+AN.Audio.Version.generated.props
+
+# Local developer overrides (not checked in)
+Directory.Build.props
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# NuGet
+*.nupkg
