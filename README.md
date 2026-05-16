@@ -13,8 +13,8 @@ AN.Audio calls them directly through PInvoke and manual COM vtable dispatch, pro
 | Platform | Backend | Status |
 |----------|---------|--------|
 | Windows | WASAPI (shared mode, event-driven) | ✅ Working |
+| macOS | AudioQueue (AudioToolbox) | ✅ Working |
 | Linux | ALSA (`libasound.so.2`) | 🔲 Planned |
-| macOS | AudioQueue (AudioToolbox) | 🔲 Planned |
 | Android | AAudio | 🔲 Future |
 | iOS | AudioQueue (AudioToolbox) | 🔲 Future |
 
@@ -88,9 +88,12 @@ AN.Audio/
 │   ├── AudioFormat.cs               # Format descriptor + SampleFormat enum
 │   ├── AudioOutput.cs               # Platform-detecting factory
 │   └── Platforms/
-│       └── Windows/
-│           ├── WasapiAudioOutput.cs  # WASAPI event-driven backend
-│           └── WasapiInterop.cs     # COM vtable structs + PInvoke
+│       ├── Windows/
+│       │   ├── WasapiAudioOutput.cs  # WASAPI event-driven backend
+│       │   └── WasapiInterop.cs     # COM vtable structs + PInvoke
+│       └── MacOS/
+│           ├── CoreAudioOutput.cs    # AudioQueue callback-driven backend
+│           └── AudioToolboxInterop.cs # AudioQueue PInvoke
 ├── tests/SimpleAudioTest/           # Standalone console test (plays a WAV file)
 ├── AN.Audio.Build.props             # Shared build infrastructure
 ├── version.jsonc                    # Version source of truth

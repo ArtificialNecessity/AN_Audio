@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using AN.Audio.Platforms.Windows;
+using AN.Audio.Platforms.MacOS;
 
 namespace AN.Audio;
 
@@ -20,11 +21,12 @@ public static class AudioOutput
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             return new WasapiAudioOutput(format, bufferSizeMs);
 
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            return new CoreAudioOutput(format, bufferSizeMs);
+
         // Future:
         // if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         //     return new AlsaAudioOutput(format, bufferSizeMs);
-        // if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        //     return new CoreAudioOutput(format, bufferSizeMs);
 
         throw new PlatformNotSupportedException(
             $"AN.Audio has no backend for {RuntimeInformation.OSDescription}");
