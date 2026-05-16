@@ -14,5 +14,5 @@
   //   publish-local.ps1              → stable 0.1.1
   //   publish-local.ps1 -Prerelease  → prerelease 0.1.0-27.0.g3be210cd
   "version": "0.1",
-  "buildNumberOffset": 4
+  "buildNumberOffset": 6
 }
