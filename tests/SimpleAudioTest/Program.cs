@@ -1,4 +1,5 @@
 using AN.Audio;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace SimpleAudioTest;
@@ -12,9 +13,21 @@ internal static class Program
 {
     static int Main(string[] args)
     {
-        string wavPath = args.Length > 0
-            ? args[0]
-            : Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "AssetSource", "cartesia_tts_test.wav");
+        // Parse args: [wavPath] [--duration <seconds>]
+        string wavPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "AssetSource", "cartesia_tts_test.wav");
+        double? durationSeconds = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--duration" && i + 1 < args.Length)
+            {
+                durationSeconds = double.Parse(args[++i]);
+            }
+            else if (!args[i].StartsWith("--"))
+            {
+                wavPath = args[i];
+            }
+        }
 
         wavPath = Path.GetFullPath(wavPath);
 
@@ -40,20 +53,32 @@ internal static class Program
         Console.WriteLine($"Latency: {output.LatencyMs:F1}ms");
 
         // Playback state — accessed only from the audio thread (no lock needed)
-        var state = new PlaybackState(wav);
+        bool looping = durationSeconds.HasValue;
+        var state = new PlaybackState(wav, looping);
 
-        Console.WriteLine("Playing... (press Enter to stop)");
+        if (durationSeconds.HasValue)
+            Console.WriteLine($"Playing (looping for {durationSeconds.Value}s)... press Enter to stop");
+        else
+            Console.WriteLine("Playing... (press Enter to stop)");
         Console.WriteLine();
 
         output.Start(state.FillBuffer);
 
-        // Wait for playback to finish or user to press Enter
+        // Wait for playback to finish, duration to elapse, or user to press Enter
         bool consoleAvailable = true;
         try { _ = Console.KeyAvailable; }
         catch (InvalidOperationException) { consoleAvailable = false; }
 
-        while (!state.Finished)
+        var stopwatch = Stopwatch.StartNew();
+        bool timedOut = false;
+
+        while (!state.Finished && !timedOut)
         {
+            if (durationSeconds.HasValue && stopwatch.Elapsed.TotalSeconds >= durationSeconds.Value)
+            {
+                timedOut = true;
+                break;
+            }
             if (consoleAvailable)
             {
                 try
@@ -71,8 +96,14 @@ internal static class Program
 
         output.Stop();
 
+        double elapsed = stopwatch.Elapsed.TotalSeconds;
         Console.WriteLine();
-        Console.WriteLine(state.Finished ? "Playback complete." : "Stopped by user.");
+        if (timedOut)
+            Console.WriteLine($"Duration test complete. Played for {elapsed:F1}s with {state.LoopCount} loops.");
+        else if (state.Finished)
+            Console.WriteLine("Playback complete.");
+        else
+            Console.WriteLine("Stopped by user.");
         return 0;
     }
 }
@@ -84,18 +115,18 @@ internal static class Program
 internal sealed class PlaybackState
 {
     private readonly WavData _wav;
+    private readonly bool _looping;
     private int _position; // byte offset into PCM data
-    private readonly byte[] _conversionBuffer; // pre-allocated for format conversion
+    private int _loopCount;
 
     public bool Finished { get; private set; }
+    public int LoopCount => _loopCount;
 
-    public PlaybackState(WavData wav)
+    public PlaybackState(WavData wav, bool looping)
     {
         _wav = wav;
+        _looping = looping;
         _position = 0;
-        // Pre-allocate conversion buffer large enough for any reasonable callback size
-        // 48000Hz * 2ch * 4bytes * 100ms = 38400 bytes. Round up generously.
-        _conversionBuffer = new byte[65536];
     }
 
     /// <summary>
@@ -124,13 +155,31 @@ internal sealed class PlaybackState
         if (!dstIsFloat && srcChannels == dstChannels && _wav.SampleRate == outputFormat.SampleRate)
         {
             int bytesNeeded = frameCount * srcBytesPerFrame;
-            int bytesAvailable = pcm.Length - _position;
-            int bytesToCopy = Math.Min(bytesNeeded, bytesAvailable);
-            int framesToCopy = bytesToCopy / srcBytesPerFrame;
+            int written = 0;
+            while (written < bytesNeeded)
+            {
+                int bytesAvailable = pcm.Length - _position;
+                int bytesToCopy = Math.Min(bytesNeeded - written, bytesAvailable);
 
-            pcm.AsSpan(_position, framesToCopy * srcBytesPerFrame).CopyTo(buffer);
-            _position += framesToCopy * srcBytesPerFrame;
-            framesWritten = framesToCopy;
+                pcm.AsSpan(_position, bytesToCopy).CopyTo(buffer.Slice(written));
+                _position += bytesToCopy;
+                written += bytesToCopy;
+
+                if (_position >= pcm.Length)
+                {
+                    if (_looping)
+                    {
+                        _position = 0;
+                        _loopCount++;
+                    }
+                    else
+                    {
+                        Finished = true;
+                        break;
+                    }
+                }
+            }
+            framesWritten = written / srcBytesPerFrame;
         }
         else
         {
@@ -139,7 +188,18 @@ internal sealed class PlaybackState
             for (int f = 0; f < frameCount; f++)
             {
                 if (_position >= pcm.Length)
-                    break;
+                {
+                    if (_looping)
+                    {
+                        _position = 0;
+                        _loopCount++;
+                    }
+                    else
+                    {
+                        Finished = true;
+                        break;
+                    }
+                }
 
                 // Read source sample(s) for this frame
                 for (int outCh = 0; outCh < dstChannels; outCh++)
@@ -176,10 +236,6 @@ internal sealed class PlaybackState
                 framesWritten++;
             }
         }
-
-        // If we ran out of data, mark finished
-        if (_position >= pcm.Length)
-            Finished = true;
 
         return framesWritten;
     }
