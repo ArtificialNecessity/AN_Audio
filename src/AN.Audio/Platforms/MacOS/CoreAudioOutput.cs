@@ -43,6 +43,32 @@ internal sealed unsafe class CoreAudioOutput : IAudioOutput
     public AudioFormat Format => _actualFormat;
     public double LatencyMs => _latencyMs;
 
+    // ── Device Management Stubs ──────────────────────────────────────────────────
+    // UNTESTED on macOS: These are stub implementations for the device management
+    // interface. Full macOS device management (CoreAudio property listeners for
+    // device enumeration and change notification) is planned but not yet implemented.
+    // Currently, macOS always uses the system default device with no auto-switching.
+
+    /// <summary>
+    /// On macOS, AudioQueue accepts whatever format we specify (it resamples internally),
+    /// so DeviceFormat always matches the consumer's requested format.
+    /// </summary>
+    public AudioFormat DeviceFormat => _actualFormat;
+
+    public AudioSwitchPolicy SwitchPolicy { get; set; } = AudioSwitchPolicy.FollowDefault;
+    public IReadOnlyList<string>? PreferredDevices { get; set; }
+    public AudioDeviceInfo? CurrentDevice => null; // TODO: Query CoreAudio for current device info
+
+    // Events — declared but never fired until macOS device management is implemented
+    public event Action<AudioFormat>? DeviceFormatChanged;
+    public event Action<DeviceLostReason>? DeviceLost;
+    public event Action<AudioDeviceInfo>? DeviceSwitched;
+
+    // Suppress CS0067 (events never used) — they will be used when macOS device management is implemented
+    private void SuppressEventWarnings()
+    { _ = DeviceFormatChanged; _ = DeviceLost; _ = DeviceSwitched; }
+    // ── End Device Management Stubs ──────────────────────────────────────────────
+
     public CoreAudioOutput(AudioFormat requestedFormat, int bufferSizeMs)
     {
         _requestedFormat = requestedFormat;

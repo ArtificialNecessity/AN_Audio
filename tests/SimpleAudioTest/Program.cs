@@ -49,17 +49,29 @@ internal static class Program
         Console.WriteLine($"Requesting format: {format.SampleRate}Hz, {format.Channels}ch, {format.Format}");
 
         using var output = AudioOutput.Create(format, bufferSizeMs: 20);
-        Console.WriteLine($"Endpoint format: {output.Format.SampleRate}Hz, {output.Format.Channels}ch, {output.Format.Format}");
+        Console.WriteLine($"Consumer format: {output.Format.SampleRate}Hz, {output.Format.Channels}ch, {output.Format.Format}");
+        Console.WriteLine($"Device format: {output.DeviceFormat.SampleRate}Hz, {output.DeviceFormat.Channels}ch, {output.DeviceFormat.Format}");
         Console.WriteLine($"Latency: {output.LatencyMs:F1}ms");
+        Console.WriteLine($"Switch policy: {output.SwitchPolicy}");
+        Console.WriteLine($"Current device: {output.CurrentDevice}");
+
+        // Subscribe to device management events for diagnostics
+        output.DeviceSwitched += device =>
+            Console.WriteLine($"\n  >> DEVICE SWITCHED: {device}");
+        output.DeviceFormatChanged += newFormat =>
+            Console.WriteLine($"\n  >> DEVICE FORMAT CHANGED: {newFormat.SampleRate}Hz, {newFormat.Channels}ch, {newFormat.Format}");
+        output.DeviceLost += reason =>
+            Console.WriteLine($"\n  >> DEVICE LOST: {reason}");
 
         // Playback state — accessed only from the audio thread (no lock needed)
-        bool looping = durationSeconds.HasValue;
+        bool looping = true; // Always loop — duration controls when we stop
         var state = new PlaybackState(wav, looping);
 
-        if (durationSeconds.HasValue)
-            Console.WriteLine($"Playing (looping for {durationSeconds.Value}s)... press Enter to stop");
-        else
-            Console.WriteLine("Playing... (press Enter to stop)");
+        // Default to 30 seconds if no duration specified (use --duration N to override)
+        if (!durationSeconds.HasValue)
+            durationSeconds = 30;
+
+        Console.WriteLine($"Playing (looping for {durationSeconds.Value}s)... press Enter to stop");
         Console.WriteLine();
 
         output.Start(state.FillBuffer);

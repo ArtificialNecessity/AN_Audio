@@ -22,6 +22,15 @@ internal static unsafe class WasapiInterop
     public const int eRender = 0;
     public const int eConsole = 0;
 
+    // Device states
+    public const uint DEVICE_STATE_ACTIVE = 0x00000001;
+    public const uint DEVICE_STATE_DISABLED = 0x00000002;
+    public const uint DEVICE_STATE_NOTPRESENT = 0x00000004;
+    public const uint DEVICE_STATE_UNPLUGGED = 0x00000008;
+
+    // Property store access
+    public const uint STGM_READ = 0x00000000;
+
     // REFERENCE_TIME is in 100ns units. 10,000 = 1ms.
     public const long REFTIMES_PER_MS = 10_000;
 
@@ -58,10 +67,26 @@ internal static unsafe class WasapiInterop
     // ─── COM Vtable Indices ──────────────────────────────────────────────
 
     // IMMDeviceEnumerator vtable (after IUnknown 0,1,2)
+    public const int IMMDeviceEnumerator_EnumAudioEndpoints = 3;
     public const int IMMDeviceEnumerator_GetDefaultAudioEndpoint = 4;
+    public const int IMMDeviceEnumerator_GetDevice = 5;
+    public const int IMMDeviceEnumerator_RegisterEndpointNotificationCallback = 6;
+    public const int IMMDeviceEnumerator_UnregisterEndpointNotificationCallback = 7;
 
     // IMMDevice vtable (after IUnknown 0,1,2)
     public const int IMMDevice_Activate = 3;
+    public const int IMMDevice_OpenPropertyStore = 4;
+    public const int IMMDevice_GetId = 5;
+    public const int IMMDevice_GetState = 6;
+
+    // IMMDeviceCollection vtable (after IUnknown 0,1,2)
+    public const int IMMDeviceCollection_GetCount = 3;
+    public const int IMMDeviceCollection_Item = 4;
+
+    // IPropertyStore vtable (after IUnknown 0,1,2)
+    public const int IPropertyStore_GetCount = 3;
+    public const int IPropertyStore_GetAt = 4;
+    public const int IPropertyStore_GetValue = 5;
 
     // IAudioClient vtable (after IUnknown 0,1,2)
     public const int IAudioClient_Initialize = 3;
@@ -234,6 +259,114 @@ internal static unsafe class WasapiInterop
             GetVtableMethod(renderClient, IAudioRenderClient_ReleaseBuffer);
         return fn(renderClient, numFramesWritten, flags);
     }
+
+    // ─── Device Management COM Wrappers ──────────────────────────────────────────
+
+    // IMMDeviceEnumerator::EnumAudioEndpoints
+    public static int EnumAudioEndpoints(nint enumerator, int dataFlow, uint stateMask, out nint collection)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, int, uint, nint*, int>)
+            GetVtableMethod(enumerator, IMMDeviceEnumerator_EnumAudioEndpoints);
+        fixed (nint* p = &collection)
+            return fn(enumerator, dataFlow, stateMask, p);
+    }
+
+    // IMMDeviceEnumerator::GetDevice
+    public static int GetDevice(nint enumerator, string deviceId, out nint device)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, char*, nint*, int>)
+            GetVtableMethod(enumerator, IMMDeviceEnumerator_GetDevice);
+        fixed (char* pId = deviceId)
+        fixed (nint* pDevice = &device)
+            return fn(enumerator, pId, pDevice);
+    }
+
+    // IMMDeviceEnumerator::RegisterEndpointNotificationCallback
+    public static int RegisterEndpointNotificationCallback(nint enumerator, nint notificationClient)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, nint, int>)
+            GetVtableMethod(enumerator, IMMDeviceEnumerator_RegisterEndpointNotificationCallback);
+        return fn(enumerator, notificationClient);
+    }
+
+    // IMMDeviceEnumerator::UnregisterEndpointNotificationCallback
+    public static int UnregisterEndpointNotificationCallback(nint enumerator, nint notificationClient)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, nint, int>)
+            GetVtableMethod(enumerator, IMMDeviceEnumerator_UnregisterEndpointNotificationCallback);
+        return fn(enumerator, notificationClient);
+    }
+
+    // IMMDeviceCollection::GetCount
+    public static int DeviceCollectionGetCount(nint collection, out uint count)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, uint*, int>)
+            GetVtableMethod(collection, IMMDeviceCollection_GetCount);
+        fixed (uint* p = &count)
+            return fn(collection, p);
+    }
+
+    // IMMDeviceCollection::Item
+    public static int DeviceCollectionItem(nint collection, uint index, out nint device)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, uint, nint*, int>)
+            GetVtableMethod(collection, IMMDeviceCollection_Item);
+        fixed (nint* p = &device)
+            return fn(collection, index, p);
+    }
+
+    // IMMDevice::GetId
+    public static int DeviceGetId(nint device, out nint idPtr)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, nint*, int>)
+            GetVtableMethod(device, IMMDevice_GetId);
+        fixed (nint* p = &idPtr)
+            return fn(device, p);
+    }
+
+    // IMMDevice::OpenPropertyStore
+    public static int DeviceOpenPropertyStore(nint device, uint access, out nint propertyStore)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, uint, nint*, int>)
+            GetVtableMethod(device, IMMDevice_OpenPropertyStore);
+        fixed (nint* p = &propertyStore)
+            return fn(device, access, p);
+    }
+
+    // IPropertyStore::GetValue
+    public static int PropertyStoreGetValue(nint store, ref PROPERTYKEY key, out PROPVARIANT pv)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, PROPERTYKEY*, PROPVARIANT*, int>)
+            GetVtableMethod(store, IPropertyStore_GetValue);
+        fixed (PROPERTYKEY* pKey = &key)
+        fixed (PROPVARIANT* pPv = &pv)
+            return fn(store, pKey, pPv);
+    }
+
+    // ─── Device Management Structs ───────────────────────────────────────────────
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PROPERTYKEY
+    {
+        public Guid fmtid;
+        public uint pid;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PROPVARIANT
+    {
+        public ushort vt;
+        public ushort wReserved1;
+        public ushort wReserved2;
+        public ushort wReserved3;
+        public nint pwszVal; // Union — for VT_LPWSTR this is the string pointer
+        public nint reserved2;
+    }
+
+    public const ushort VT_LPWSTR = 31;
+
+    [DllImport("ole32.dll")]
+    public static extern int PropVariantClear(ref PROPVARIANT pvar);
 
     // ─── Win32 PInvoke ───────────────────────────────────────────────────────────
 
