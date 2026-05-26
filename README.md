@@ -65,13 +65,6 @@ On Windows, WASAPI shared mode dictates the endpoint format (typically 48kHz/ste
 ## Building
 
 ```
-dotnet build AN.Audio.slnx
-```
-
-After clone, generate the version props file first:
-
-```
-./cmd/gen-version-file.ps1
 dotnet build
 ```
 
@@ -82,7 +75,7 @@ $env:LOCAL_NUGET_REPO = "C:\path\to\local\feed"
 ./cmd/publish-local.ps1
 ```
 
-This increments the version, builds, packs `ArtificialNecessity.Audio`, and deploys the `.nupkg` to your local feed.
+This builds, packs `ArtificialNecessity.Audio`, and deploys the `.nupkg` to your local feed. Versioning is automatic (timestamp-based).
 
 ## Project Structure
 
@@ -100,11 +93,10 @@ AN.Audio/
 │           ├── CoreAudioOutput.cs    # AudioQueue callback-driven backend
 │           └── AudioToolboxInterop.cs # AudioQueue PInvoke
 ├── tests/SimpleAudioTest/           # Standalone console test (plays a WAV file)
-├── AN.Audio.Build.props             # Shared build infrastructure
-├── version.jsonc                    # Version source of truth
+├── AN.Audio.Build.props             # Shared build infrastructure (timestamp versioning v2)
 └── cmd/
-    ├── gen-version-file.ps1         # Generate version props from version.jsonc + git
-    └── publish-local.ps1            # Build + pack + deploy in one step
+    ├── publish-local.ps1            # Build + pack + deploy to local feed
+    └── nuget-publish-audio.ps1      # Build + pack + push to NuGet.org
 ```
 
 ## Design Principles

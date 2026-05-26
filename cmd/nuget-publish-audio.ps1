@@ -1,9 +1,12 @@
 #!/usr/bin/env pwsh
-# publish-nuget.ps1 — Build a release package and push to NuGet.org
+# nuget-publish-audio.ps1 — Build a release package and push to NuGet.org
+#
+# Versioning is timestamp-based (v2) — every build gets a unique version
+# automatically via AN.Audio.Build.props. No version files to manage.
 #
 # Usage (from anywhere):
-#   .\cmd\publish-nuget.ps1          # pack + push
-#   .\cmd\publish-nuget.ps1 -DryRun  # pack only, show what would be pushed
+#   .\cmd\nuget-publish-audio.ps1          # pack + push
+#   .\cmd\nuget-publish-audio.ps1 -DryRun  # pack only, show what would be pushed
 #
 param(
     [switch]$DryRun
@@ -18,30 +21,6 @@ $csprojPath = Join-Path $projectRoot 'src\AN.Audio\AN.Audio.csproj'
 $releaseOutputDir = Join-Path $projectRoot 'artifacts\Packages\Release'
 $localNuGetFeedPath = 'C:\PROJECTS\LocalNuGet'
 
-# Increment version + regenerate props
-$publishLocalScript = Join-Path $projectRoot 'cmd\publish-local.ps1'
-Write-Host "`n=== Incrementing version ==="  -ForegroundColor Cyan
-
-$packageBase = Join-Path $env:USERPROFILE ".nuget\packages\artificialnecessity.codeanalyzers"
-if (-not (Test-Path $packageBase)) { Write-Host "ERROR: Package artificialnecessity.codeanalyzers not found in NuGet cache." -ForegroundColor Red; exit 1 }
-$latestVersion = Get-ChildItem $packageBase -Directory |
-    Where-Object { $_.Name -notmatch '-' } |
-    Sort-Object { [version]$_.Name } |
-    Select-Object -Last 1
-if (-not $latestVersion) { Write-Host "ERROR: No stable version of artificialnecessity.codeanalyzers found." -ForegroundColor Red; exit 1 }
-$jsonPeekExePath = Join-Path $latestVersion.FullName "tools\net8.0\any\JsonPeek.exe"
-if (-not (Test-Path $jsonPeekExePath)) { Write-Host "ERROR: JsonPeek.exe not found at $jsonPeekExePath" -ForegroundColor Red; exit 1 }
-$versionJsoncPath = Join-Path $projectRoot "version.jsonc"
-$newBuildOffset = & $jsonPeekExePath --inc-integer $versionJsoncPath buildNumberOffset
-if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: Failed to increment buildNumberOffset" -ForegroundColor Red; exit 1 }
-$baseVersion = & $jsonPeekExePath $versionJsoncPath version
-Write-Host "Version: $baseVersion.$newBuildOffset (buildNumberOffset incremented)" -ForegroundColor Yellow
-
-# Regenerate version props
-$genVersionScript = Join-Path $projectRoot "cmd\gen-version-file.ps1"
-& $genVersionScript
-if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: gen-version-file.ps1 failed" -ForegroundColor Red; exit 1 }
-
 Write-Host "`n=== Packing release ===" -ForegroundColor Cyan
 dotnet pack $csprojPath -c Release
 if ($LASTEXITCODE -ne 0) {
@@ -49,9 +28,8 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-# Find the newest .nupkg (excluding prerelease packages with '-' in version)
+# Find the newest .nupkg
 $newestReleasePackage = Get-ChildItem (Join-Path $releaseOutputDir 'ArtificialNecessity.Audio.*.nupkg') |
-    Where-Object { $_.Name -notmatch '\d+-\d+' } |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 
