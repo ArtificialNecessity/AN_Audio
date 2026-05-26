@@ -60,27 +60,34 @@
        automatically — no version.jsonc, no generated files, no scripts.
 
        Format:
-         AssemblyVersion      = {major}.{YYMM}.{DDHH}.{mmss}
+         AssemblyVersion      = {major}.{YYMM}.{DDHH}.{mmss}  (ushort-constrained)
          FileVersion          = (same as AssemblyVersion)
-         Version              = {major}.{YYMM}.{DDHH}
+         Version              = {major}.{YYMMDD}.{HHmmss}      (NuGet, no ushort limit)
          InformationalVersion = {AssemblyVersion}-{MACHINE}+g{gitshort}
 
        Example (2026-05-25 16:53:07 UTC):
-         AssemblyVersion:      0.2605.2516.5307
+         AssemblyVersion:      0.2605.2516.5307   (ushort segments, local time)
+         PackageVersion:       0.260525.165307    (full date+time, local time)
          InformationalVersion: 0.2605.2516.5307-WORKHORSE+ga1b2c3d
 
-       All timestamps are UTC. Each segment stays ≤ 65535.
+       All timestamps are local time. AssemblyVersion segments ≤ 65535 (ushort).
+       NuGet PackageVersion segments have no such constraint.
        Just 'dotnet build' — zero ceremony.
        ══════════════════════════════════════════════════════════════════ -->
   <PropertyGroup>
     <ANAudioMajorVersion>0</ANAudioMajorVersion>
-    <_BuildYYMM>$([System.DateTime]::UtcNow.ToString("yyMM"))</_BuildYYMM>
-    <_BuildDDHH>$([System.DateTime]::UtcNow.ToString("ddHH"))</_BuildDDHH>
-    <_Buildmmss>$([System.DateTime]::UtcNow.ToString("mmss"))</_Buildmmss>
+    <!-- AssemblyVersion segments (ushort-constrained, split timestamp) -->
+    <_BuildYYMM>$([System.DateTime]::Now.ToString("yyMM"))</_BuildYYMM>
+    <_BuildDDHH>$([System.DateTime]::Now.ToString("ddHH"))</_BuildDDHH>
+    <_Buildmmss>$([System.DateTime]::Now.ToString("mmss"))</_Buildmmss>
     <VersionPrefix>$(ANAudioMajorVersion).$(_BuildYYMM).$(_BuildDDHH).$(_Buildmmss)</VersionPrefix>
     <AssemblyVersion>$(VersionPrefix)</AssemblyVersion>
     <FileVersion>$(VersionPrefix)</FileVersion>
-    <Version>$(ANAudioMajorVersion).$(_BuildYYMM).$(_BuildDDHH)</Version>
+    <!-- PackageVersion segments (NuGet, no ushort constraint — full date+time) -->
+    <_BuildYYMMDD>$([System.DateTime]::Now.ToString("yyMMdd"))</_BuildYYMMDD>
+    <_BuildHHmmss>$([System.DateTime]::Now.ToString("HHmmss"))</_BuildHHmmss>
+    <!-- Parse as int to strip leading zeros — NuGet normalizes them anyway -->
+    <Version>$(ANAudioMajorVersion).$([System.Int32]::Parse($(_BuildYYMMDD))).$([System.Int32]::Parse($(_BuildHHmmss)))</Version>
   </PropertyGroup>
 
   <!-- Suppress SDK's automatic SourceRevisionId — we handle git hash ourselves -->
