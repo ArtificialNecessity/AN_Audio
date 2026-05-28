@@ -49,7 +49,7 @@ public static class AudioOutput
             return new WasapiAudioOutput(format, options);
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            return new CoreAudioOutput(format, options?.BufferSizeMs ?? 20);
+            return new CoreAudioOutput(format, options);
 
         // Future:
         // if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
@@ -70,7 +70,9 @@ public static class AudioOutput
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             return WasapiDeviceManager.Instance;
 
-        // TODO: macOS device manager (CoreAudio property listeners)
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            return CoreAudioDeviceManager.Instance;
+
         // TODO: Linux device manager (ALSA device hints + udev)
         return null;
     }
