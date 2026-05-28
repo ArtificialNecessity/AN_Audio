@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using AN.Audio.Platforms.Windows;
 using AN.Audio.Platforms.MacOS;
+using AN.Audio.Platforms.Linux;
 
 namespace AN.Audio;
 
@@ -15,9 +16,8 @@ public static class AudioOutput
     /// </summary>
     public static bool IsAvailable =>
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-        || RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
-        // Future:
-        // || RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
+        || RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+        || RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
 
     /// <summary>
     /// Create the platform-appropriate audio output with default options.
@@ -51,9 +51,8 @@ public static class AudioOutput
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             return new CoreAudioOutput(format, options);
 
-        // Future:
-        // if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        //     return new AlsaAudioOutput(format, options);
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            return new AlsaAudioOutput(format, options);
 
         throw new PlatformNotSupportedException(
             $"AN.Audio has no backend for {RuntimeInformation.OSDescription}");
@@ -73,7 +72,9 @@ public static class AudioOutput
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             return CoreAudioDeviceManager.Instance;
 
-        // TODO: Linux device manager (ALSA device hints + udev)
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            return AlsaDeviceManager.Instance;
+
         return null;
     }
 }
