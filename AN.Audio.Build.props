@@ -47,7 +47,7 @@
   </PropertyGroup>
 
   <!-- Deploy .nupkg to local NuGet feed after pack -->
-  <Target Name="DeployToLocalNuGet" AfterTargets="Pack" Condition="'$(LocalNuGetFeedPath)' != ''">
+  <Target Name="DeployToLocalNuGet" AfterTargets="Pack" Condition="'$(LocalNuGetFeedPath)' != '' AND '$(IsPackable)' == 'true'">
     <MakeDir Directories="$(LocalNuGetFeedPath)" Condition="!Exists('$(LocalNuGetFeedPath)')" />
     <Copy SourceFiles="$(PackageOutputPath)\$(PackageId).$(PackageVersion).nupkg"
           DestinationFolder="$(LocalNuGetFeedPath)"
