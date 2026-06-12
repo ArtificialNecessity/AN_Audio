@@ -18,11 +18,6 @@ internal sealed class AudioFormatConverter
     private double _resampleFrac;
     private double _resampleStep; // consumer_rate / device_rate
 
-    // Leftover buffer: unconsumed source frames from previous callback
-    // (in float format, interleaved, consumer channel count)
-    private float[]? _leftoverBuf;
-    private int _leftoverFrames;
-
     // Cached for fast path check
     private bool _isPassthrough;
 
@@ -46,7 +41,6 @@ internal sealed class AudioFormatConverter
     {
         _deviceFormat = newDeviceFormat;
         _resampleFrac = 0;
-        _leftoverFrames = 0;
         _sincResampler = CreateResamplerIfNeeded();
         RecalculateState();
     }
@@ -57,7 +51,6 @@ internal sealed class AudioFormatConverter
     public void Reset()
     {
         _resampleFrac = 0;
-        _leftoverFrames = 0;
         _sincResampler?.Reset();
     }
 
@@ -126,52 +119,30 @@ internal sealed class AudioFormatConverter
         {
             if (_sincResampler != null)
             {
-                // Convert source bytes to float
+                // High-quality sinc resampling path
                 int srcSampleCount = srcFrames * srcChannels;
-
-                // Total float samples = leftover + new source
-                int totalSrcFrames = _leftoverFrames + srcFrames;
-                int totalSampleCount = totalSrcFrames * srcChannels;
-                float[] srcFloatRented = System.Buffers.ArrayPool<float>.Shared.Rent(totalSampleCount);
-                Span<float> srcFloat = srcFloatRented.AsSpan(0, totalSampleCount);
+                float[] srcFloatRented = System.Buffers.ArrayPool<float>.Shared.Rent(srcSampleCount);
+                Span<float> srcFloat = srcFloatRented.AsSpan(0, srcSampleCount);
 
                 try
                 {
-                    // Copy leftover frames first
-                    if (_leftoverFrames > 0 && _leftoverBuf != null)
-                    {
-                        _leftoverBuf.AsSpan(0, _leftoverFrames * srcChannels).CopyTo(srcFloat);
-                    }
-
-                    // Convert new source bytes to float, appending after leftovers
-                    int floatOffset = _leftoverFrames * srcChannels;
+                    // Convert source bytes to float
                     for (int f = 0; f < srcFrames; f++)
                     {
                         for (int ch = 0; ch < srcChannels; ch++)
                         {
-                            srcFloat[floatOffset + f * srcChannels + ch] = ReadSampleAsFloat(srcBuf, f, ch, srcChannels, _consumerFormat);
+                            srcFloat[f * srcChannels + ch] = ReadSampleAsFloat(srcBuf, f, ch, srcChannels, _consumerFormat);
                         }
                     }
 
-                    // Resample
+                    // Resample (consumes ALL srcFrames, stores unconsumed tail in history)
                     int dstSampleCount = maxDstFrames * srcChannels;
                     float[] dstFloatRented = System.Buffers.ArrayPool<float>.Shared.Rent(dstSampleCount);
                     Span<float> dstFloat = dstFloatRented.AsSpan(0, dstSampleCount);
 
                     try
                     {
-                        int resampledFrames = _sincResampler.Process(
-                            srcFloat, totalSrcFrames, dstFloat, maxDstFrames, out int srcConsumed);
-
-                        // Save unconsumed source frames as leftovers for next call
-                        int leftover = totalSrcFrames - srcConsumed;
-                        if (leftover > 0)
-                        {
-                            EnsureLeftoverBuffer(leftover * srcChannels);
-                            srcFloat.Slice(srcConsumed * srcChannels, leftover * srcChannels)
-                                .CopyTo(_leftoverBuf.AsSpan());
-                        }
-                        _leftoverFrames = leftover;
+                        int resampledFrames = _sincResampler.Process(srcFloat, srcFrames, dstFloat, maxDstFrames);
 
                         // Write resampled output with channel mapping and format conversion
                         for (int f = 0; f < resampledFrames; f++)
@@ -239,12 +210,6 @@ internal sealed class AudioFormatConverter
         }
 
         return dstFrame;
-    }
-
-    private void EnsureLeftoverBuffer(int minSamples)
-    {
-        if (_leftoverBuf == null || _leftoverBuf.Length < minSamples)
-            _leftoverBuf = new float[minSamples + 64];
     }
 
     private static float ReadSampleAsFloat(Span<byte> buf, int frame, int channel, int channelCount, AudioFormat fmt)

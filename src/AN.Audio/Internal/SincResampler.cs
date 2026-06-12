@@ -6,6 +6,10 @@ namespace AN.Audio.Internal;
 /// High-quality windowed-sinc resampler using a Kaiser-windowed polyphase FIR filter.
 /// Supports any sample rate ratio (rational or irrational). Zero-allocation on the hot path.
 /// Maintains state between calls for streaming use.
+///
+/// IMPORTANT: The resampler always consumes ALL provided source frames. Unconsumed
+/// frames are stored in the internal history buffer for the next call's kernel lookback.
+/// This means the caller can advance its source pointer by the full srcFrames amount.
 /// </summary>
 internal sealed class SincResampler
 {
@@ -27,15 +31,21 @@ internal sealed class SincResampler
     private readonly int _channels;
     private readonly double _ratio; // srcRate / dstRate
 
-    // History buffer for carrying samples across callback boundaries.
-    // Stores recent source frames so the kernel can look back across call boundaries.
-    private const int HistoryCapacity = KernelWidth; // 16 frames (one full kernel width)
+    // History buffer: stores the tail of ALL source frames provided (not just consumed).
+    // This ensures that when the next call's kernel looks back, it sees the correct data.
+    // Size must accommodate the maximum lookback the kernel needs.
+    private const int HistoryCapacity = KernelWidth; // 16 frames
     private readonly float[] _history; // HistoryCapacity * channels
     private int _historyCount; // Number of valid frames in history (0..HistoryCapacity)
 
-    // Fractional sub-sample position within the current source frame.
-    // Always in the range [0, 1). Tracks the fractional part between integer source positions.
+    // Tracks the fractional sub-sample position between calls.
+    // srcIndex (integer part) is reset each call; only the fraction carries over.
     private double _fracPosition;
+
+    // Tracks how many source frames were provided but not yet "reached" by the
+    // output position. This is the distance from where we stopped to the end of src.
+    // On the next call, this becomes a negative start offset (we begin in history).
+    private int _pendingSourceFrames;
 
     /// <summary>
     /// Creates a new SincResampler for the given rate conversion and channel count.
@@ -47,47 +57,45 @@ internal sealed class SincResampler
         _history = new float[HistoryCapacity * channels];
         _historyCount = 0;
         _fracPosition = 0;
+        _pendingSourceFrames = 0;
     }
 
     /// <summary>
-    /// Reset the resampler state (history buffer and fractional position).
-    /// Call on device switch or playback restart.
+    /// Reset the resampler state. Call on device switch or playback restart.
     /// </summary>
     public void Reset()
     {
         Array.Clear(_history);
         _historyCount = 0;
         _fracPosition = 0;
+        _pendingSourceFrames = 0;
     }
 
     /// <summary>
     /// Process source frames and produce resampled output frames.
-    /// Source and destination are interleaved float samples.
-    /// The resampler reports how many source frames were actually consumed,
-    /// which may be less than srcFrames. The caller must only advance its source
-    /// pointer by srcConsumed.
+    /// ALL source frames are consumed (stored in history if not directly used).
+    /// The caller should advance its source pointer by the full srcFrames.
     /// </summary>
     /// <param name="src">Source samples (interleaved float, srcFrames * channels).</param>
-    /// <param name="srcFrames">Number of source frames available.</param>
+    /// <param name="srcFrames">Number of source frames provided.</param>
     /// <param name="dst">Destination buffer (interleaved float, maxDstFrames * channels).</param>
     /// <param name="maxDstFrames">Maximum number of output frames to produce.</param>
-    /// <param name="srcConsumed">Number of source frames actually consumed. The caller must
-    /// only advance its source pointer by this amount.</param>
     /// <returns>Number of output frames actually produced.</returns>
-    public int Process(ReadOnlySpan<float> src, int srcFrames, Span<float> dst, int maxDstFrames, out int srcConsumed)
+    public int Process(ReadOnlySpan<float> src, int srcFrames, Span<float> dst, int maxDstFrames)
     {
         int channels = _channels;
         double ratio = _ratio;
         int dstFrame = 0;
 
-        // srcIndex tracks which integer source frame we're at.
-        // frac tracks the fractional position between source frames.
-        int srcIndex = 0;
+        // srcIndex starts negative if we have pending frames from last call
+        // (meaning the output position is still "in" the previous source data,
+        // which is now in our history buffer).
+        int srcIndex = -_pendingSourceFrames;
         double frac = _fracPosition;
 
         while (dstFrame < maxDstFrames)
         {
-            // The kernel needs source frames [srcIndex - KernelHalfWidth + 1 .. srcIndex + KernelHalfWidth - 1]
+            // The kernel accesses [srcIndex - KernelHalfWidth + 1 .. srcIndex + KernelHalfWidth - 1]
             int lastNeeded = srcIndex + KernelHalfWidth - 1;
             if (lastNeeded >= srcFrames)
                 break; // Not enough source data
@@ -112,84 +120,48 @@ internal sealed class SincResampler
 
             dstFrame++;
 
-            // Advance position by the ratio
+            // Advance position
             frac += ratio;
             int advance = (int)frac;
             frac -= advance;
             srcIndex += advance;
         }
 
-        // Save fractional position for next call
+        // Save fractional position
         _fracPosition = frac;
 
-        // Update history: save the last KernelHalfWidth frames from the consumed source.
-        // The kernel looks back KernelHalfWidth-1 frames from center, so we need that many
-        // frames from the end of consumed data for the next call's lookback.
-        int consumed = srcIndex;
-        srcConsumed = consumed;
+        // How many source frames are "ahead" of where we stopped?
+        // These frames were provided but the output hasn't caught up to them yet.
+        // They'll be in history for the next call's kernel to access.
+        _pendingSourceFrames = srcFrames - srcIndex;
+        if (_pendingSourceFrames < 0) _pendingSourceFrames = 0;
 
-        // Save the tail of consumed source into history
-        int framesToSave = Math.Min(HistoryCapacity, consumed);
-        if (framesToSave > 0)
+        // Update history: save the tail of the source buffer.
+        // The kernel needs up to KernelHalfWidth frames of lookback.
+        // We save up to HistoryCapacity frames from the end of the provided source.
+        int framesToSave = Math.Min(HistoryCapacity, srcFrames);
+        int saveStart = srcFrames - framesToSave;
+        for (int f = 0; f < framesToSave; f++)
         {
-            int srcStart = consumed - framesToSave;
-            // If srcStart is negative, we need to pull from old history
-            if (srcStart >= 0)
+            for (int ch = 0; ch < channels; ch++)
             {
-                for (int f = 0; f < framesToSave; f++)
-                {
-                    for (int ch = 0; ch < channels; ch++)
-                    {
-                        _history[f * channels + ch] = src[(srcStart + f) * channels + ch];
-                    }
-                }
-                _historyCount = framesToSave;
-            }
-            else
-            {
-                // Some frames come from old history, some from src
-                int fromHistory = -srcStart;
-                int fromSrc = consumed;
-                int oldHistStart = _historyCount - fromHistory;
-
-                int writeIdx = 0;
-                // Copy from old history tail
-                for (int f = 0; f < fromHistory && oldHistStart + f >= 0; f++)
-                {
-                    for (int ch = 0; ch < channels; ch++)
-                    {
-                        _history[writeIdx * channels + ch] = _history[(oldHistStart + f) * channels + ch];
-                    }
-                    writeIdx++;
-                }
-                // Copy from src
-                for (int f = 0; f < fromSrc; f++)
-                {
-                    for (int ch = 0; ch < channels; ch++)
-                    {
-                        _history[writeIdx * channels + ch] = src[f * channels + ch];
-                    }
-                    writeIdx++;
-                }
-                _historyCount = writeIdx;
+                _history[f * channels + ch] = src[(saveStart + f) * channels + ch];
             }
         }
-        else if (consumed == 0)
-        {
-            // No frames consumed, history stays the same
-        }
+        _historyCount = framesToSave;
 
         return dstFrame;
     }
 
     /// <summary>
-    /// Process overload without srcConsumed output (consumes all source frames).
-    /// For use when the caller provides exactly the right amount of source data
-    /// (e.g., in tests where source is pre-sliced to the exact consumed amount).
+    /// Process overload that also reports srcConsumed (for compatibility with tests).
+    /// Since ALL source frames are always consumed, srcConsumed always equals srcFrames.
     /// </summary>
-    public int Process(ReadOnlySpan<float> src, int srcFrames, Span<float> dst, int maxDstFrames)
+    public int Process(ReadOnlySpan<float> src, int srcFrames, Span<float> dst, int maxDstFrames, out int srcConsumed)
     {
-        return Process(src, srcFrames, dst, maxDstFrames, out _);
+        int result = Process(src, srcFrames, dst, maxDstFrames);
+        srcConsumed = srcFrames; // Always consumes all provided frames
+        return result;
     }
 
     /// <summary>
@@ -207,24 +179,26 @@ internal sealed class SincResampler
         }
         else
         {
-            // Negative position: look in history buffer.
             // srcPos = -1 means the last frame in history (index histCount-1)
             int histIdx = _historyCount + srcPos;
             if (histIdx < 0)
-                return 0f; // Before available history
+                return 0f; // Before available history — zero pad
             return _history[histIdx * channels + ch];
         }
     }
 
     /// <summary>
     /// Estimate how many source frames are needed to produce the given number of output frames.
+    /// Provides enough so the resampler can fill the full output without running short.
     /// </summary>
     public int EstimateSourceFrames(int outputFrames)
     {
-        // The resampler consumes approximately (outputFrames * ratio + currentFrac) integer frames.
-        // Add 1 for rounding. The kernel looks into history for lookback so we don't need
-        // to add kernel margin — just provide enough for the center positions to advance through.
-        return (int)(outputFrames * _ratio + _fracPosition) + 2;
+        // The resampler starts at srcIndex = -_pendingSourceFrames, advances by ~ratio per output.
+        // After outputFrames outputs, srcIndex ≈ -_pendingSourceFrames + outputFrames * ratio + frac.
+        // We need lastNeeded = srcIndex + KernelHalfWidth - 1 < srcFrames.
+        // So: srcFrames > outputFrames * ratio - _pendingSourceFrames + frac + KernelHalfWidth - 1
+        int needed = (int)(outputFrames * _ratio + _fracPosition) - _pendingSourceFrames + KernelHalfWidth + 1;
+        return Math.Max(needed, 0);
     }
 
     /// <summary>
@@ -249,7 +223,6 @@ internal sealed class SincResampler
                 sum += coeff;
             }
 
-            // Normalize so coefficients sum to 1.0 (preserves DC gain)
             if (Math.Abs(sum) > 1e-10)
             {
                 float invSum = (float)(1.0 / sum);
