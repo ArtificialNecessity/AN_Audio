@@ -4,18 +4,24 @@ namespace AN.Audio.Internal;
 
 /// <summary>
 /// Converts audio between consumer format and device format.
-/// Handles: sample format (Int16 ↔ Float32), sample rate (linear interpolation),
+/// Handles: sample format (Int16 ↔ Float32), sample rate (windowed-sinc resampling),
 /// and channel count (mono → stereo upmix, stereo → mono downmix).
-/// Zero-allocation on the hot path.
+/// Zero-allocation on the hot path (uses ArrayPool rentals).
 /// </summary>
 internal sealed class AudioFormatConverter
 {
     private readonly AudioFormat _consumerFormat;
+    private SincResampler? _sincResampler;
     private AudioFormat _deviceFormat;
 
-    // Resampling state
+    // Resampling state (kept for linear interp fallback)
     private double _resampleFrac;
     private double _resampleStep; // consumer_rate / device_rate
+
+    // Leftover buffer: unconsumed source frames from previous callback
+    // (in float format, interleaved, consumer channel count)
+    private float[]? _leftoverBuf;
+    private int _leftoverFrames;
 
     // Cached for fast path check
     private bool _isPassthrough;
@@ -24,6 +30,7 @@ internal sealed class AudioFormatConverter
     {
         _consumerFormat = consumerFormat;
         _deviceFormat = deviceFormat;
+        _sincResampler = CreateResamplerIfNeeded();
         RecalculateState();
     }
 
@@ -39,6 +46,8 @@ internal sealed class AudioFormatConverter
     {
         _deviceFormat = newDeviceFormat;
         _resampleFrac = 0;
+        _leftoverFrames = 0;
+        _sincResampler = CreateResamplerIfNeeded();
         RecalculateState();
     }
 
@@ -48,6 +57,8 @@ internal sealed class AudioFormatConverter
     public void Reset()
     {
         _resampleFrac = 0;
+        _leftoverFrames = 0;
+        _sincResampler?.Reset();
     }
 
     /// <summary>
@@ -55,37 +66,28 @@ internal sealed class AudioFormatConverter
     /// The callback is invoked with the consumer format; output is written in device format.
     /// Returns the number of device frames actually filled.
     /// </summary>
-    /// <param name="deviceBuffer">Raw device buffer to fill (in device format).</param>
-    /// <param name="deviceFrameCount">Number of device frames requested.</param>
-    /// <param name="callback">The consumer's audio callback.</param>
-    /// <returns>Number of device frames written.</returns>
     public unsafe int FillDeviceBuffer(Span<byte> deviceBuffer, int deviceFrameCount, AudioCallback callback)
     {
         if (_isPassthrough)
         {
-            // Fast path: formats match exactly, just call through
             return callback(deviceBuffer, deviceFrameCount, _consumerFormat);
         }
 
-        // Slow path: need conversion
         return ConvertAndFill(deviceBuffer, deviceFrameCount, callback);
     }
 
     private unsafe int ConvertAndFill(Span<byte> deviceBuffer, int deviceFrameCount, AudioCallback callback)
     {
-        // Strategy: request consumer frames, then convert to device format.
-        // For resampling, we need to figure out how many consumer frames
-        // will produce the requested device frames.
-        int consumerFramesNeeded = EstimateConsumerFrames(deviceFrameCount);
+        int consumerFramesNeeded = _sincResampler != null
+            ? _sincResampler.EstimateSourceFrames(deviceFrameCount)
+            : EstimateConsumerFrames(deviceFrameCount);
 
-        // Rent a temporary buffer for consumer data
         int consumerBytes = consumerFramesNeeded * _consumerFormat.BytesPerFrame;
         byte[] rented = System.Buffers.ArrayPool<byte>.Shared.Rent(consumerBytes);
         Span<byte> consumerBuffer = rented.AsSpan(0, consumerBytes);
 
         try
         {
-            // Get consumer data
             int consumerFramesWritten = callback(consumerBuffer, consumerFramesNeeded, _consumerFormat);
             if (consumerFramesWritten == 0)
             {
@@ -93,12 +95,10 @@ internal sealed class AudioFormatConverter
                 return 0;
             }
 
-            // Convert consumer frames to device frames
             int deviceFramesProduced = ConvertFrames(
                 consumerBuffer, consumerFramesWritten,
                 deviceBuffer, deviceFrameCount);
 
-            // Zero any remaining device frames
             if (deviceFramesProduced < deviceFrameCount)
             {
                 int filledBytes = deviceFramesProduced * _deviceFormat.BytesPerFrame;
@@ -114,13 +114,8 @@ internal sealed class AudioFormatConverter
         }
     }
 
-    /// <summary>
-    /// Convert consumer frames to device frames.
-    /// Handles sample rate, sample format, and channel count differences.
-    /// </summary>
     private int ConvertFrames(Span<byte> srcBuf, int srcFrames, Span<byte> dstBuf, int maxDstFrames)
     {
-        // Work in float internally for all conversions
         int srcChannels = _consumerFormat.Channels;
         int dstChannels = _deviceFormat.Channels;
         bool needResample = _consumerFormat.SampleRate != _deviceFormat.SampleRate;
@@ -129,33 +124,104 @@ internal sealed class AudioFormatConverter
 
         if (needResample)
         {
-            // Resampling with linear interpolation
-            while (dstFrame < maxDstFrames)
+            if (_sincResampler != null)
             {
-                // Determine the fractional position in the source
-                int srcIdx = (int)_resampleFrac;
-                double frac = _resampleFrac - srcIdx;
+                // Convert source bytes to float
+                int srcSampleCount = srcFrames * srcChannels;
 
-                if (srcIdx + 1 >= srcFrames)
-                    break; // Not enough source data
+                // Total float samples = leftover + new source
+                int totalSrcFrames = _leftoverFrames + srcFrames;
+                int totalSampleCount = totalSrcFrames * srcChannels;
+                float[] srcFloatRented = System.Buffers.ArrayPool<float>.Shared.Rent(totalSampleCount);
+                Span<float> srcFloat = srcFloatRented.AsSpan(0, totalSampleCount);
 
-                // Interpolate each source channel, then write to dest channels
-                for (int dstCh = 0; dstCh < dstChannels; dstCh++)
+                try
                 {
-                    int srcCh = MapChannel(dstCh, srcChannels, dstChannels);
-                    float s0 = ReadSampleAsFloat(srcBuf, srcIdx, srcCh, srcChannels, _consumerFormat);
-                    float s1 = ReadSampleAsFloat(srcBuf, srcIdx + 1, srcCh, srcChannels, _consumerFormat);
-                    float interpolated = (float)(s0 + (s1 - s0) * frac);
-                    WriteSampleFromFloat(dstBuf, dstFrame, dstCh, dstChannels, _deviceFormat, interpolated);
+                    // Copy leftover frames first
+                    if (_leftoverFrames > 0 && _leftoverBuf != null)
+                    {
+                        _leftoverBuf.AsSpan(0, _leftoverFrames * srcChannels).CopyTo(srcFloat);
+                    }
+
+                    // Convert new source bytes to float, appending after leftovers
+                    int floatOffset = _leftoverFrames * srcChannels;
+                    for (int f = 0; f < srcFrames; f++)
+                    {
+                        for (int ch = 0; ch < srcChannels; ch++)
+                        {
+                            srcFloat[floatOffset + f * srcChannels + ch] = ReadSampleAsFloat(srcBuf, f, ch, srcChannels, _consumerFormat);
+                        }
+                    }
+
+                    // Resample
+                    int dstSampleCount = maxDstFrames * srcChannels;
+                    float[] dstFloatRented = System.Buffers.ArrayPool<float>.Shared.Rent(dstSampleCount);
+                    Span<float> dstFloat = dstFloatRented.AsSpan(0, dstSampleCount);
+
+                    try
+                    {
+                        int resampledFrames = _sincResampler.Process(
+                            srcFloat, totalSrcFrames, dstFloat, maxDstFrames, out int srcConsumed);
+
+                        // Save unconsumed source frames as leftovers for next call
+                        int leftover = totalSrcFrames - srcConsumed;
+                        if (leftover > 0)
+                        {
+                            EnsureLeftoverBuffer(leftover * srcChannels);
+                            srcFloat.Slice(srcConsumed * srcChannels, leftover * srcChannels)
+                                .CopyTo(_leftoverBuf.AsSpan());
+                        }
+                        _leftoverFrames = leftover;
+
+                        // Write resampled output with channel mapping and format conversion
+                        for (int f = 0; f < resampledFrames; f++)
+                        {
+                            for (int dstCh = 0; dstCh < dstChannels; dstCh++)
+                            {
+                                int srcCh = MapChannel(dstCh, srcChannels, dstChannels);
+                                float sample = dstFloat[f * srcChannels + srcCh];
+                                WriteSampleFromFloat(dstBuf, f, dstCh, dstChannels, _deviceFormat, sample);
+                            }
+                        }
+                        dstFrame = resampledFrames;
+                    }
+                    finally
+                    {
+                        System.Buffers.ArrayPool<float>.Shared.Return(dstFloatRented);
+                    }
+                }
+                finally
+                {
+                    System.Buffers.ArrayPool<float>.Shared.Return(srcFloatRented);
+                }
+            }
+            else
+            {
+                // Fallback: linear interpolation
+                while (dstFrame < maxDstFrames)
+                {
+                    int srcIdx = (int)_resampleFrac;
+                    double frac = _resampleFrac - srcIdx;
+
+                    if (srcIdx + 1 >= srcFrames)
+                        break;
+
+                    for (int dstCh = 0; dstCh < dstChannels; dstCh++)
+                    {
+                        int srcCh = MapChannel(dstCh, srcChannels, dstChannels);
+                        float s0 = ReadSampleAsFloat(srcBuf, srcIdx, srcCh, srcChannels, _consumerFormat);
+                        float s1 = ReadSampleAsFloat(srcBuf, srcIdx + 1, srcCh, srcChannels, _consumerFormat);
+                        float interpolated = (float)(s0 + (s1 - s0) * frac);
+                        WriteSampleFromFloat(dstBuf, dstFrame, dstCh, dstChannels, _deviceFormat, interpolated);
+                    }
+
+                    dstFrame++;
+                    _resampleFrac += _resampleStep;
                 }
 
-                dstFrame++;
-                _resampleFrac += _resampleStep;
+                _resampleFrac -= srcFrames;
+                if (_resampleFrac < 0) _resampleFrac = 0;
             }
-
-            // Adjust _resampleFrac to account for consumed source frames
-            _resampleFrac -= srcFrames;
-            if (_resampleFrac < 0) _resampleFrac = 0;
         }
         else
         {
@@ -175,9 +241,12 @@ internal sealed class AudioFormatConverter
         return dstFrame;
     }
 
-    /// <summary>
-    /// Read a sample from the buffer as a float in [-1, 1] range.
-    /// </summary>
+    private void EnsureLeftoverBuffer(int minSamples)
+    {
+        if (_leftoverBuf == null || _leftoverBuf.Length < minSamples)
+            _leftoverBuf = new float[minSamples + 64];
+    }
+
     private static float ReadSampleAsFloat(Span<byte> buf, int frame, int channel, int channelCount, AudioFormat fmt)
     {
         int sampleIndex = frame * channelCount + channel;
@@ -186,16 +255,13 @@ internal sealed class AudioFormatConverter
             var floats = MemoryMarshal.Cast<byte, float>(buf);
             return floats[sampleIndex];
         }
-        else // Int16
+        else
         {
             var shorts = MemoryMarshal.Cast<byte, short>(buf);
             return shorts[sampleIndex] / 32768f;
         }
     }
 
-    /// <summary>
-    /// Write a float sample [-1, 1] to the buffer in the target format.
-    /// </summary>
     private static void WriteSampleFromFloat(Span<byte> buf, int frame, int channel, int channelCount, AudioFormat fmt, float value)
     {
         int sampleIndex = frame * channelCount + channel;
@@ -204,38 +270,26 @@ internal sealed class AudioFormatConverter
             var floats = MemoryMarshal.Cast<byte, float>(buf);
             floats[sampleIndex] = value;
         }
-        else // Int16
+        else
         {
             var shorts = MemoryMarshal.Cast<byte, short>(buf);
             shorts[sampleIndex] = (short)(value * 32767f);
         }
     }
 
-    /// <summary>
-    /// Map destination channel to source channel.
-    /// Mono → Stereo: both dest channels read from source channel 0.
-    /// Stereo → Mono: dest channel 0 reads from source channel 0 (simple, not averaged).
-    /// Same channel count: 1:1 mapping.
-    /// </summary>
     private static int MapChannel(int dstChannel, int srcChannels, int dstChannels)
     {
         if (srcChannels == dstChannels)
             return dstChannel;
         if (srcChannels == 1)
-            return 0; // mono source: all dest channels read from channel 0
-        // Multi-channel source, fewer dest channels: just take the first N
+            return 0;
         return dstChannel < srcChannels ? dstChannel : 0;
     }
 
-    /// <summary>
-    /// Estimate how many consumer frames are needed to produce the given device frames.
-    /// </summary>
     private int EstimateConsumerFrames(int deviceFrames)
     {
         if (_consumerFormat.SampleRate == _deviceFormat.SampleRate)
             return deviceFrames;
-
-        // Add a small margin for resampling (need src+1 for interpolation)
         return (int)(deviceFrames * _resampleStep) + 2;
     }
 
@@ -246,5 +300,13 @@ internal sealed class AudioFormatConverter
                       && _consumerFormat.Format == _deviceFormat.Format;
 
         _resampleStep = (double)_consumerFormat.SampleRate / _deviceFormat.SampleRate;
+    }
+
+    private SincResampler? CreateResamplerIfNeeded()
+    {
+        if (_consumerFormat.SampleRate == _deviceFormat.SampleRate)
+            return null;
+
+        return new SincResampler(_consumerFormat.SampleRate, _deviceFormat.SampleRate, _consumerFormat.Channels);
     }
 }

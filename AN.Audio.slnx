@@ -4,5 +4,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SimpleAudioTest/SimpleAudioTest.csproj" />
+    <Project Path="tests/AN.Audio.Tests/AN.Audio.Tests.csproj" />
   </Folder>
 </Solution>
