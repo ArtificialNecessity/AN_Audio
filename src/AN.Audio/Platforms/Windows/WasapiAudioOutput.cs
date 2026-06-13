@@ -285,6 +285,7 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
         if (!_running) return;
 
         _running = false;
+        _callback = null; // Clear before join so audio thread sees it immediately
         _audioThread?.Join(timeout: TimeSpan.FromSeconds(2));
         _audioThread = null;
 
@@ -293,8 +294,6 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
             AudioClientStop(_audioClient);
             AudioClientReset(_audioClient);
         }
-
-        _callback = null;
     }
 
     // ── Audio Thread ─────────────────────────────────────────────────────────────
@@ -305,6 +304,10 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
 
         while (_running)
         {
+            // Snapshot callback early — Stop() may null it at any time
+            var callback = _callback;
+            if (callback == null) break;
+
             // Check if a device switch was requested
             if (_deviceSwitchRequested)
             {
@@ -342,11 +345,19 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
             }
 
             // Fill the device buffer via the format converter
+            var converter = _converter;
+            if (converter == null)
+            {
+                // Stop() or device switch nulled the converter — release buffer as silent and exit
+                RenderClientReleaseBuffer(_renderClient, framesAvailable, AUDCLNT_BUFFERFLAGS_SILENT);
+                break;
+            }
+
             int totalBytes = (int)framesAvailable * _deviceFrameBytes;
             var bufferSpan = new Span<byte>(dataPtr, totalBytes);
 
-            int framesWritten = _converter!.FillDeviceBuffer(
-                bufferSpan, (int)framesAvailable, _callback!);
+            int framesWritten = converter.FillDeviceBuffer(
+                bufferSpan, (int)framesAvailable, callback);
 
             // If fewer frames written, silence the remainder
             if (framesWritten < (int)framesAvailable)
