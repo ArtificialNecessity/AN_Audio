@@ -1,7 +1,13 @@
-# SPEC-ANAudio: Cross-Platform Audio via Direct PInvoke
+# SPEC-10 AN.Audio initial bringup: PCM output via direct PInvoke
 
-**Status:** Draft  
-**Last Updated:** 2026-05-16
+**Status:** Implemented (Windows, macOS, Linux); Android/iOS and mixer pending  
+**Last Updated:** 2026-09-07  
+**Parent:** `00_AN_Audio_Overview.md` — the library's goal and invariants live there, not here.
+
+> **Scope of this document: the FIRST bringup increment of AN.Audio — playback only.** It established the callback shape,
+> the PInvoke-only rule and the per-platform backend layout that every later feature area (device management, MIDI, capture)
+> reuses. Statements below such as "playback only" and "neither needs capture" describe *this sprint's* scope, not the
+> library's: audio input, MIDI in/out and the remaining platforms are all in scope for AN.Audio (see the overview's matrix).
 
 - [ ] Milestone 1 — Core abstraction + Windows WASAPI backend
 - [ ] Milestone 2 — Linux ALSA backend
@@ -11,18 +17,18 @@
 
 ## Overview
 
-AN.Audio is a thin cross-platform audio playback layer for .NET that talks directly to native OS audio APIs via PInvoke — no native libraries to bundle, no NuGet packages with precompiled C blobs, no dependency management headaches. Each platform backend is ~200-400 lines of C# interop code wrapping 4-8 native calls.
+This increment delivers AN.Audio's PCM **playback** path: a thin layer for .NET that talks directly to native OS audio APIs via PInvoke — no native libraries to bundle, no NuGet packages with precompiled C blobs, no dependency management headaches. Each platform backend is ~200-400 lines of C# interop code wrapping 4-8 native calls.
 
 The .NET cross-platform audio ecosystem is fragmented: NAudio is Windows-only in practice, OpenAL NuGet packages require manual native installs, SDL2 audio requires bundling SDL2 (which FluidUI's version may not include), and miniaudio wrappers are thin unsafe PInvoke over a C library you still have to compile and ship. The actual platform audio APIs are simple — the libraries are just hiding that from you.
 
-This module targets Mirica (UI sounds, terminal bells, notification audio, potential browser audio) and Arcane Siege (SFX, music, ambient). Both need low-latency event-driven playback of PCM data. Neither needs capture (recording) in the near term.
+The first consumers were Mirica (UI sounds, terminal bells, notification audio, potential browser audio) and Arcane Siege (SFX, music, ambient). Both need low-latency event-driven playback of PCM data, and neither needed capture in the near term — which is why this increment stopped at output.
 
 ### Design Constraints
 
 - **Zero native dependencies** beyond the OS itself. No `.so`, `.dylib`, or `.dll` to bundle (the audio APIs are part of the OS).
 - **Event-driven only.** The OS calls us when it needs samples (or we use an event/semaphore to wake a feeder thread). No polling loops. No spin-waits.
 - **NativeAOT compatible.** No reflection-based COM interop. Manual vtable calls for Windows COM interfaces.
-- **Playback only** for V1. Capture is a separate concern.
+- **Playback only in this increment.** Capture (`IAudioInput`) is a later spec (`40_Audio_Capture.md`, TBD) with the same shape.
 - **PCM focus.** The abstraction deals in PCM buffers. Decoding (MP3, OGG, WAV) is a separate layer above this.
 
 ## Architecture

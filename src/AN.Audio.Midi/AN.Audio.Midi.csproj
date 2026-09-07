@@ -7,16 +7,17 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <RootNamespace>AN.Audio</RootNamespace>
+    <RootNamespace>AN.Audio.Midi</RootNamespace>
     <!-- Packed into ArtificialNecessity.Audio by src/AN.Audio.Package (SPEC-30 D21). -->
     <IsPackable>false</IsPackable>
-    <Description>Cross-platform audio playback via direct PInvoke to OS audio APIs (WASAPI, ALSA, CoreAudio). Zero native dependencies.</Description>
-    <Authors>David Jeske</Authors>
-    <Copyright>(C)opyright David Jeske 2026</Copyright>
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="AN.Audio.Tests" />
+    <InternalsVisibleTo Include="AN.Audio.Midi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AN.Audio\AN.Audio.csproj" />
   </ItemGroup>
 
 </Project>

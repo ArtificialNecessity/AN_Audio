@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    AN.Audio.Package — the ONLY packable project (SPEC-30 D21).
+    Produces the ArtificialNecessity.Audio nupkg containing both AN.Audio.dll and
+    AN.Audio.Midi.dll in lib/<tfm>/. This project has no source of its own.
+  -->
+
+  <Import Project="$(MSBuildThisFileDirectory)../../AN.Audio.Build.props" />
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AN.Audio</RootNamespace>
+    <AssemblyName>AN.Audio.Package</AssemblyName>
+    <!-- Do not ship the (empty) AN.Audio.Package.dll itself. -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <IsPackable>true</IsPackable>
+    <PackageId>ArtificialNecessity.Audio</PackageId>
+    <Description>Cross-platform audio and MIDI via direct PInvoke to OS APIs (WASAPI, ALSA, CoreAudio, WinMM). Zero native dependencies.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+    <PackageProjectUrl>https://github.com/ArtificialNecessity/AN_Audio</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ArtificialNecessity/AN_Audio</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <Authors>David Jeske</Authors>
+    <Copyright>(C)opyright David Jeske 2026</Copyright>
+    <!-- Hook that adds the referenced project DLLs to lib/<tfm>/. NOTE: must be the *ContentInPackage* hook —
+         the *BuildOutput* hook is skipped entirely when IncludeBuildOutput=false. -->
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AN_Audio_IncludeReferencedProjectsInPackage</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AN.Audio\AN.Audio.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\AN.Audio.Midi\AN.Audio.Midi.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../../README.md" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)../../LICENSE.txt" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <Target Name="AN_Audio_IncludeReferencedProjectsInPackage">
+    <ItemGroup>
+      <_ANAudioPackagedProjectOutput Include="@(ReferenceCopyLocalPaths)"
+                                     Condition="'%(ReferenceCopyLocalPaths.ReferenceSourceTarget)' == 'ProjectReference' And ('%(ReferenceCopyLocalPaths.Extension)' == '.dll' Or '%(ReferenceCopyLocalPaths.Extension)' == '.xml' Or '%(ReferenceCopyLocalPaths.Extension)' == '.pdb')" />
+      <TfmSpecificPackageFile Include="@(_ANAudioPackagedProjectOutput)" PackagePath="lib/$(TargetFramework)/" />
+    </ItemGroup>
+  </Target>
+
+</Project>
