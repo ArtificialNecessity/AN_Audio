@@ -1,14 +1,54 @@
 # SPEC-ANAudio-DeviceManagement: Device Enumeration, Selection & Change Notification
 
-**Status:** Draft  
-**Last Updated:** 2026-05-19  
-**Parent:** SPEC-ANAudio (Cross-Platform Audio via Direct PInvoke)
+**Status:** Implemented (Windows, macOS, Linux) — the pseudocode below is the original design; see "As built" for the shipped surface  
+**Last Updated:** 2026-09-07  
+**Parent:** `00_AN_Audio_Overview.md`; builds on `10_Audio_Bringup.md`
 
-- [ ] Milestone 1 — Abstraction layer (`IAudioDeviceManager`, `AudioDeviceInfo`)
-- [ ] Milestone 2 — Windows implementation (MMDevice API)
-- [ ] Milestone 3 — Linux implementation (ALSA device hints + error recovery)
-- [ ] Milestone 4 — macOS implementation (CoreAudio property listeners)
-- [ ] Milestone 5 — Wire into `IAudioOutput` — device selection at creation, auto-recovery on device loss
+- [x] Milestone 1 — Abstraction layer (`IAudioDeviceManager`, `AudioDeviceInfo`)
+- [x] Milestone 2 — Windows implementation (MMDevice API, `WasapiDeviceManager` with manual-vtable `IMMNotificationClient`)
+- [x] Milestone 3 — Linux implementation (`AlsaDeviceManager`: device hints + reactive loss)
+- [x] Milestone 4 — macOS implementation (`CoreAudioDeviceManager`: property listeners)
+- [x] Milestone 5 — Wire into `IAudioOutput` — `AudioOutputOptions`, `AudioSwitchPolicy`, auto-recovery inside the backends
+
+## As built (2026-09-07) — differences from the design sketch below
+
+The shipped API is in `src/AN.Audio/`: `IAudioDeviceManager.cs`, `AudioDeviceInfo.cs`, `DeviceChangeType.cs`, `DeviceLostReason.cs`,
+`AudioSwitchPolicy.cs`, `AudioOutputOptions.cs`, and the device-management members of `IAudioOutput.cs`.
+
+| Sketch below | Shipped | Why |
+|---|---|---|
+| `AudioDeviceInfo.SupportsOutput` | dropped | Only output devices are enumerated; the flag was always true. |
+| `AudioOutput.Create(format, string deviceId, …)` | `AudioOutput.Create(format, AudioOutputOptions)` with `PreferredDevices` + `SwitchPolicy` | One options object instead of overload growth; device choice is a *policy*, not a one-shot id. |
+| `IAudioOutput.Device` | `IAudioOutput.CurrentDevice` (nullable) | Naming. |
+| `DeviceLost` "fired on the audio thread" | **background thread**, like every other control-plane event | Invariant I5 in the overview: consumers marshal to UI themselves; never do control-plane work on the hot thread. |
+| Consumer implements the "Auto-Recovery Pattern" | **The library recovers** when `SwitchPolicy` is `FollowDefault` (default) or `PreferenceList`; `DeviceLost` is informational, then `DeviceSwitched(newDevice)` and `DeviceFormatChanged(newFormat)` fire. `SwitchPolicy.None` reproduces the sketch's consumer-driven behaviour. | Recovery inside the backend is where the stream state lives; consumers were all going to write the same code. |
+| `DeviceLostReason.DefaultChanged` | kept, but only observable with `SwitchPolicy.None` | With auto-switch the stream simply moves. |
+| Format handled by consumer | `IAudioOutput.Format` is fixed at creation; `DeviceFormat` may change on switch; conversion/resampling is internal (`Internal/AudioFormatConverter`, `Internal/SincResampler`, spec 01) | Consumer format never changes underneath a caller. |
+| `IAudioDeviceManager.GetDeviceManager()` non-null | `AudioOutput.GetDeviceManager()` is **nullable** (null on platforms without a backend) | Matches `AudioOutput.IsAvailable` degrade-gracefully policy. |
+| `DeviceListChanged(DeviceChangeType, AudioDeviceInfo)` | `Action<DeviceChangeType, AudioDeviceInfo?>` — info may be null for removals where the device can no longer be described | Windows reports removal by id only. |
+
+Shipped `IAudioOutput` device-management members (verbatim from `IAudioOutput.cs`):
+
+```csharp
+AudioSwitchPolicy SwitchPolicy { get; set; }                 // FollowDefault (default) | PreferenceList | None; mutable at runtime
+IReadOnlyList<string>? PreferredDevices { get; set; }        // device Ids, highest priority first; used by PreferenceList
+AudioDeviceInfo? CurrentDevice { get; }
+event Action<AudioFormat>? DeviceFormatChanged;              // background thread
+event Action<DeviceLostReason>? DeviceLost;                  // background thread; informational unless SwitchPolicy == None
+event Action<AudioDeviceInfo>? DeviceSwitched;               // background thread; only when SwitchPolicy != None
+```
+
+`DeviceChangeType { Added, Removed, StateChanged }` is shared with `AN.Audio.Midi` (`IMidiInput_DeviceManager.DeviceListChanged`, spec 30).
+`AN.Audio.Midi` did **not** reuse `DeviceLostReason`; MIDI has its own `MidiInput_LostReason` because its failure set differs
+(`InUseByAnotherApplication`, `Stopped`).
+
+Open questions status: Linux udev — still open (reactive loss shipped). Device capability querying — deferred as proposed.
+Multiple simultaneous outputs — supported (two `IAudioOutput` instances); the `ERole` nuance is unaddressed.
+
+---
+
+> Everything below this line is the original design document, kept for the platform mechanics (COM vtables, ALSA hints,
+> CoreAudio property listeners), which are accurate. Where API shapes differ, the "As built" table above wins.
 
 ## Overview
 

@@ -67,13 +67,14 @@ public enum Midi_MessageKind : byte { NoteOff, NoteOn, PolyPressure, ControlChan
 public enum Midi_Status : byte { NoteOff = 0x80, NoteOn = 0x90, PolyPressure = 0xA0, ControlChange = 0xB0, ProgramChange = 0xC0, ChannelPressure = 0xD0, PitchBend = 0xE0,
                                  SysExStart = 0xF0, MtcQuarterFrame = 0xF1, SongPosition = 0xF2, SongSelect = 0xF3, TuneRequest = 0xF6, SysExEnd = 0xF7,
                                  TimingClock = 0xF8, Start = 0xFA, Continue = 0xFB, Stop = 0xFC, ActiveSensing = 0xFE, Reset = 0xFF }
-public enum Midi_Controller : byte { BankSelectMsb = 0, ModWheel = 1, Expression = 11, Sustain = 64, /* … */ AllSoundOff = 120, ResetAllControllers = 121, AllNotesOff = 123 }
+public enum Midi_Controller : byte { BankSelectMsb = 0, ModWheel = 1, Volume = 7, Pan = 10, Expression = 11, Sustain = 64, /* … RPN/NRPN … */ AllSoundOff = 120, ResetAllControllers = 121, AllNotesOff = 123, /* … */ PolyOn = 127 }
 public enum Midi_SysExId : byte { NonCommercial = 0x7D, UniversalNonRealTime = 0x7E, UniversalRealTime = 0x7F, ExtendedManufacturer = 0x00 }
-public enum Midi_UniversalNonRealTimeSubId1 : byte { GeneralInformation = 0x06 /* … */ }
+public enum Midi_UniversalNonRealTimeSubId1 : byte { SampleDumpHeader = 0x01, /* … */ GeneralInformation = 0x06, /* … */ Ack = 0x7F }
 public enum Midi_GeneralInformationSubId2 : byte { IdentityRequest = 0x01, IdentityReply = 0x02 }
-public readonly record struct Midi_Channel(byte Index0To15);
+public enum Midi_SysExDeviceId : byte { AllCall = 0x7F }
+public readonly record struct Midi_Channel(byte Index0To15) { int DisplayNumber1To16 }
 public readonly record struct Midi_Note(byte Number);            // 60 = C4
-public readonly record struct Midi_Velocity(byte Value);
+public readonly record struct Midi_Velocity(byte Value) { float Normalized0To1 }
 public readonly record struct Midi_ManufacturerId(int Value, bool IsExtended);   // 1- or 3-byte SysEx manufacturer id
 
 // ---- the one struct on the hot path (16 bytes, blittable) -------------------------------
@@ -95,10 +96,10 @@ public readonly record struct MidiInput_Message
 public readonly record struct MidiInput_PortIndex(byte Value);
 
 // ---- SysEx (cold path) --------------------------------------------------------------------
-public sealed class MidiInput_SysExMessage { public long ArrivalTicks; public MidiInput_PortIndex Port; public ReadOnlyMemory<byte> Bytes /* F0..F7 inclusive */; }
+public sealed class MidiInput_SysExMessage { public long ArrivalTicks { get; init; } public MidiInput_PortIndex Port { get; init; } public ReadOnlyMemory<byte> Bytes { get; init; } /* F0..F7 inclusive */ }
 public sealed record MidiInput_DeviceIdentity(Midi_ManufacturerId Manufacturer, ushort Family, ushort Member, uint SoftwareRevision);
 /// Stable per device TYPE (D11): derived from the Identity Reply (manufacturer, family, member) when available, else a hash of (szPname, wMid, wPid) flagged IsUnknownType.
-public readonly record struct MidiInput_DeviceTypeId(Guid Value, bool IsUnknownType);
+public readonly record struct MidiInput_DeviceTypeId(Guid Value, bool IsUnknownType) { static FromIdentity(MidiInput_DeviceIdentity); static UnknownFromDriverCaps(string portName, ushort driverMid, ushort driverPid); }
 
 // ---- devices ------------------------------------------------------------------------------
 public readonly record struct MidiInput_DeviceKey(string Value);       // per port INSTANCE, stable across renumbering (D11)
@@ -116,6 +117,7 @@ public sealed class MidiInput_Options
     public int PollIntervalMs { get; init; } = 1000;
     public MidiInput_HotPlugSource HotPlugSource { get; init; } = MidiInput_HotPlugSource.Poll;
     public bool RequestIdentityOnOpen { get; init; } = true;   // D8
+    public int IdentityReplyTimeoutMs { get; init; } = 500;    // D9 — how long the out-port sender waits for MOM_DONE
     public bool EnableIoStatus { get; init; } = true;          // D22: MIDI_IO_STATUS on midiInOpen (MIM_MOREDATA → LagCount)
     public int SysExBuffersPerPort { get; init; } = 2; public int SysExBufferBytes { get; init; } = 256;
     public int SysExMaxBytes { get; init; } = 64 * 1024;       // D20: reassembly cap; longer messages are discarded and counted
@@ -144,12 +146,14 @@ public interface IMidiInput : IDisposable
     void Start();                                              // ring delivery; callable again after Stop() (D14)
     void Start(MidiInput_Callback rawCallback);                // raw delivery (ring NOT filled; Overflow never fires); mode may differ from the previous Start (D14)
     void Stop();                                               // blocks until quiescent (D14); throws InvalidOperationException if called from inside the callback
+    bool IsRunning { get; }
     bool IsInsideCallback { get; }                             // true only on the driver thread while the callback is running (D14)
     IReadOnlyList<MidiInput_DeviceInfo> OpenPorts { get; }     // snapshot of open ports (compacted; NOT indexed by PortIndex)
     bool TryGetPort(MidiInput_PortIndex port, out MidiInput_DeviceInfo info);   // resolve a message's Port; slots are stable while open, reused after close
     MidiInput_OpenPolicy OpenPolicy { get; set; }
     IReadOnlyList<MidiInput_DeviceKey>? PreferredDevices { get; set; }
     void RequestIdentity(MidiInput_PortIndex port);            // async; result via IdentityResolved + DeviceInfo.Identity; silent no-op on failure/timeout (D9)
+    long SysExDiscardedCount { get; }                          // D20 — SysEx messages discarded (over cap / aborted), summed over open ports
 
     event Action<MidiInput_DeviceInfo>? DeviceOpened;
     event Action<MidiInput_DeviceInfo, MidiInput_LostReason>? DeviceLost;
@@ -193,28 +197,33 @@ while (midi.Ring.TryDequeue(out var m))
 | File | Contents |
 |---|---|
 | `WinMm_MidiInterop.cs` | `[LibraryImport("winmm.dll")]` prototypes exactly as in `_EXTERNAL_APIS/WinMM_MidiIn.md`; `WinMm_MidiHdr`, `WinMm_MidiInCaps2W`, `WinMm_MidiOutCapsW` (`LayoutKind.Sequential`, `CharSet.Unicode`); enums `WinMm_Result`, `WinMm_MidiInMessage` (`Open=0x3C1 … MoreData=0x3CC`), `WinMm_MidiOutMessage`, `WinMm_OpenFlags` (`CallbackFunction=0x30000, IoStatus=0x20`), `WinMm_HdrFlags`. **No literal constants outside this file (D12).** |
-| `WinMm_MidiInPort.cs` | One open port: handle, `GCHandle` for `dwInstance`, N pinned SysEx headers/buffers (`NativeMemory`), reassembly state, `[UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])] static void Proc(…)` that stamps, unpacks `dwParam1`, writes to ring or raw callback, re-adds SysEx buffers unless closing. |
-| `WinMm_MidiInput.cs` | `IMidiInput`: policy, enumerate→diff→open/close, poll thread, identity request orchestration (pair out-port by name, `midiOutLongMsg`, 500 ms timeout), events. |
-| `WinMm_MidiInDeviceManager.cs` | `IMidiInput_DeviceManager`, poll-based; Sprint 2 adds `NotifyDeviceChange` and the message-only window. |
-| `WinMm_MidiOutLongSender.cs` (Internal) | Sprint-1 minimal sender for Identity Request; grows into `WinMm_MidiOutput` in Sprint 3. |
+| `WinMm_MidiInEnumerator.cs` | Shared by input and device manager: `midiInGetDevCapsW` → `WinMm_MidiInDeviceEntry` (index, name, wMid/wPid, `Key`, fallback `TypeId`, `HasPairedOutput`); `FindPairedOutputIndex(name)`. Key builder per D11. |
+| `WinMm_MidiInPort.cs` | One open port: handle, `GCHandle` for `dwInstance`, N pinned SysEx headers/buffers (`NativeMemory`), reassembler, in-flight counter, `[UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])] static void MidiInProc(…)` that stamps, unpacks `dwParam1`, hands off to the owner (ring or raw callback), re-adds SysEx buffers unless closing, swallows exceptions at the native boundary. `Close()` = closing flag → `midiInStop` → `midiInReset` → spin until in-flight == 0 → unprepare → free → `midiInClose`. |
+| `WinMm_MidiInput.cs` | `IMidiInput`: 256-slot port table (slot == `MidiInput_PortIndex`), one worker thread (poll rescan + SysEx dispatch + identity requests + overflow reporting), `[ThreadStatic]` callback depth for `IsInsideCallback`, `_failedKeys` for D16. `Start()` blocks until the first rescan completes so `OpenPorts` is populated on return. Events fire on the worker thread, wrapped so a throwing handler cannot kill it. |
+| `WinMm_MidiInDeviceManager.cs` | `IMidiInput_DeviceManager` singleton; poller thread starts on first `DeviceListChanged` subscription; `NotifyDeviceChange()` wakes it immediately (usable today as the host hook; Sprint 2 adds the library-owned window). |
+| `WinMm_MidiOutLongSender.cs` | Sprint-1 minimal sender: open → prepare → `midiOutLongMsg` → wait `MOM_DONE` (timeout) → unprepare → close. On timeout the header is intentionally leaked rather than freed under the driver. Grows into `WinMm_MidiOutput` in Sprint 3. |
 
 `Internal/`: `Midi_SysExReassembler`, `Midi_IdentityReplyParser`. `MidiInput_MessageRing` lives at the project root (public type; D23: segmented SPSC — `Volatile` head/tail per segment, `Volatile` `Next` link; producer allocates a new segment when the tail is full and below `RingMaxCapacity`; drained segments are recycled, never freed). Also `WinMm_MidiInEnumerator.cs` (shared by input and device manager: caps → `WinMm_MidiInDeviceEntry` with key/type-id, paired-output lookup by `szPname`).
 
 ## 6. Tests (`tests/AN.Audio.Midi.Tests/`, xunit)
 
-- `MidiInput_MessageTests`: kind/channel decode for every status; velocity-0 folding; pitch-bend 14-bit; struct size == 16 (`Unsafe.SizeOf`).
-- `MidiInput_MessageRingTests`: SPSC ordering; wrap within a segment; **growth**: burst past `RingInitialCapacity` → no drops, `CurrentCapacity` and `GrowCount` increase, every message dequeued in order across the segment boundary; **cap**: burst past `RingMaxCapacity` → drop-newest + `DroppedCount`; `Max == Initial` never grows; steady-state zero allocations across 1e6 enqueue/dequeue after growth has settled (`GC.GetAllocatedBytesForCurrentThread` delta == 0).
-- `Midi_SysExReassemblerTests`: single-buffer, split across 3 buffers, aborted (no F7 then new F0), Identity Reply parse for 1-byte and 3-byte manufacturer ids (fixtures: Arturia `00 20 6B`, Roland `41`).
-- `WinMm_InteropLayoutTests` (Windows only): `sizeof(WinMm_MidiHdr)` == 120 on x64 / 64 on x86, `WinMm_MidiInCaps2W` == 124, `midiInGetNumDevs()` callable (no device required), every enum value equals the SDK constant it names (guards D12 typos).
-- `tests/SimpleMidiTest/`: console app: list devices, open all, print messages with both timestamps, send Identity Request, exit on Enter. Manual verification with real hardware; not part of CI.
+As built (55 tests, all passing):
+
+- `MidiInput_MessageTests`: kind decode for every status byte (theory), channel nibble, velocity-0 folding (D15), pitch-bend 14-bit LSB-first, struct size == 16 (`Unsafe.SizeOf`).
+- `MidiInput_MessageRingTests`: empty; order + wrap within one segment; fixed-size drop-newest + `DroppedCount` and recovery after drain; **growth** to max with `GrowCount`/`CurrentCapacity`; order across segment boundaries under random interleaving (bounded by the `Max − Initial` guarantee, D23); grown ring reuses segments with no further growth; steady-state zero allocations (1e6 ops); real two-thread producer/consumer 500k messages in order; `LagCount` independent of `DroppedCount`; invalid capacities throw.
+- `Midi_SysExTests`: request bytes; Identity Reply parse for 3-byte (Arturia `00 20 6B`) and 1-byte (Roland `41`) ids; rejects non-identity/truncated; `MidiInput_DeviceTypeId` deterministic and distinct per identity, unknown-type fallback deterministic; reassembler single-buffer, 3-fragment join, aborted message discarded, `SysExMaxBytes` cap enforced with recovery, continuation-without-start ignored.
+- `WinMm_InteropLayoutTests`: `sizeof(WinMm_MidiHdr)` == 120 on x64, `WinMm_MidiInCaps2W` == 124, `WinMm_MidiOutCapsW` == 84, every enum value equals its SDK constant (D12), `UnpackShortMessage` byte order, `midiInGetNumDevs()` callable, enumeration keys unique (this test found the same-`NameGuid` issue).
+- `tests/SimpleMidiTest/` (`cmd/test-midi.cmd`): lists ports, opens all, prints each message with both timestamps + decoded form, prints opened/lost/identity/SysEx/overflow events; keys `i` (identity request), `s` (stats), `q` (quit). Manual, not CI.
 
 ## 7. Documentation changes (this sprint)
 
-- `README.md`: status table gains a MIDI section; API section gains the `MidiInput` snippet; **“Playback only — capture/recording is a separate concern for the future” becomes “Audio input (capture) and MIDI I/O are in scope; capture is not yet implemented”.**
-- `README.md` “Project Structure” tree: add `src/AN.Audio.Midi/`, `src/AN.Audio.Package/`, `tests/AN.Audio.Midi.Tests/`, `tests/SimpleMidiTest/`.
-- `AN.Audio.Package.csproj` `<Description>`: “Cross-platform audio and MIDI via direct PInvoke …” (D21 moves packaging metadata here; `AN.Audio.csproj` becomes `IsPackable=false`).
-- `cmd/publish-local.ps1`, `cmd/nuget-publish-audio.ps1`: pack `src/AN.Audio.Package/AN.Audio.Package.csproj` instead of `AN.Audio.csproj`.
-- `AN.Audio.slnx`: add `AN.Audio.Midi`, `AN.Audio.Package`, `AN.Audio.Midi.Tests`, `SimpleMidiTest`.
+All done 2026-09-07:
+
+- [x] `README.md`: MIDI section (snippet, key-types table, platform table); intro says “audio playback and MIDI input”; the “Playback only” principle became “Scope — output, capture and MIDI I/O behind one API shape; capture not yet implemented”; project-structure tree lists the new projects and `cmd/test-midi.cmd`.
+- [x] `AN.Audio.Package.csproj` carries all package metadata and the `<Description>` “Cross-platform audio and MIDI …”; `AN.Audio.csproj` is `IsPackable=false` (D21).
+- [x] Publish scripts rewritten as cross-platform C# (`cmd/publish-local.cs`, `cmd/nuget-publish-audio.cs`, with `.cmd` runners); the `.ps1` versions were deleted. Both pack `src/AN.Audio.Package` only and pass one timestamp to MSBuild so both DLLs and the nupkg share a version.
+- [x] `cmd/test-midi.cmd` runs `tests/SimpleMidiTest`.
+- [x] `AN.Audio.slnx` lists `AN.Audio.Midi`, `AN.Audio.Package`, `AN.Audio.Midi.Tests`, `SimpleMidiTest`.
 
 ## 8. Open questions
 

@@ -9,11 +9,11 @@
 > reuses. Statements below such as "playback only" and "neither needs capture" describe *this sprint's* scope, not the
 > library's: audio input, MIDI in/out and the remaining platforms are all in scope for AN.Audio (see the overview's matrix).
 
-- [ ] Milestone 1 — Core abstraction + Windows WASAPI backend
-- [ ] Milestone 2 — Linux ALSA backend
-- [ ] Milestone 3 — macOS CoreAudio backend
+- [x] Milestone 1 — Core abstraction + Windows WASAPI backend
+- [x] Milestone 2 — Linux ALSA backend (implemented in source; runtime availability depends on ALSA + a usable device)
+- [x] Milestone 3 — macOS CoreAudio backend
 - [ ] Milestone 4 — Android AAudio backend (future)
-- [ ] Milestone 5 — Simple mixer for layered playback
+- [ ] Milestone 5 — Simple mixer for layered playback (not started; per `00_AN_Audio_Overview.md` "Non-goals", mixing is above this library — this milestone may be retired)
 
 ## Overview
 
@@ -472,34 +472,42 @@ Rules for callback implementors:
 
 ## Project Structure
 
+As built (mixer not built — see Milestone 5):
+
 ```
-AN.Audio/
-├── IAudioOutput.cs          // interface + AudioFormat + AudioCallback
-├── AudioOutput.cs           // factory (platform detection)
+src/AN.Audio/
+├── IAudioOutput.cs          // interface + AudioCallback delegate (incl. device-management members, spec 20)
+├── AudioFormat.cs           // AudioFormat + SampleFormat
+├── AudioOutput.cs           // factory (runtime platform detection) + GetDeviceManager()
+├── AudioOutputOptions.cs, AudioSwitchPolicy.cs, AudioDeviceInfo.cs, DeviceChangeType.cs, DeviceLostReason.cs, IAudioDeviceManager.cs
+├── Internal/
+│   ├── AudioFormatConverter.cs   // consumer format → device format, passthrough fast path
+│   └── SincResampler.cs          // Kaiser-windowed sinc SRC (spec 01)
 ├── Platforms/
 │   ├── Windows/
-│   │   ├── WasapiAudioOutput.cs
-│   │   └── WasapiInterop.cs       // COM vtable structs + PInvoke
+│   │   ├── WasapiAudioOutput.cs, WasapiDeviceManager.cs
+│   │   └── WasapiInterop.cs       // manual COM vtable dispatch + PInvoke
 │   ├── Linux/
-│   │   ├── AlsaAudioOutput.cs
+│   │   ├── AlsaAudioOutput.cs, AlsaDeviceManager.cs
 │   │   └── AlsaInterop.cs         // libasound PInvoke
 │   └── MacOS/
-│       ├── CoreAudioOutput.cs
-│       └── AudioToolboxInterop.cs  // AudioQueue PInvoke
-└── Mixer/
-    ├── AudioMixer.cs
-    └── IAudioSource.cs
+│       ├── CoreAudioOutput.cs, CoreAudioDeviceManager.cs
+│       └── AudioToolboxInterop.cs, CoreAudioInterop.cs
+└── (Mixer/ — NOT built; Milestone 5 remains open and may live above this library entirely)
+
+src/AN.Audio.Midi/               // MIDI input, spec 30 — same layout
+src/AN.Audio.Package/            // the only packable project; produces the ArtificialNecessity.Audio nupkg with both DLLs
 ```
 
-Platform-specific files are conditionally compiled (or runtime-selected; conditional compilation is cleaner for NativeAOT trimming).
+Platform selection is **runtime** (`RuntimeInformation.IsOSPlatform` in the factories), not conditional compilation — one AnyCPU assembly per feature area. All backends compile on every OS; only the matching one is instantiated.
 
 ---
 
 ## Open Questions
 
-- **Format conversion**: If WASAPI shared mode returns float32/48kHz but the consumer wants int16/44100, should the backend do the conversion or should there be a resampler layer between the backend and the consumer? Leaning toward: the backend always exposes the native format, and a `ResamplingAudioOutput` wrapper handles conversion if needed.
-- **Device selection**: V1 uses the default device only. Device enumeration and hot-plug detection is a future concern. WASAPI, ALSA, and CoreAudio all support enumeration but the APIs differ significantly.
-- **Error reporting**: Underruns are common during development. Should the backend surface underrun counts or just log them?
+- ~~**Format conversion**~~ — **Resolved**: the consumer's `Format` is fixed at creation and `DeviceFormat` is exposed separately; conversion (Int16↔Float32, channel mapping) and sample-rate conversion happen inside the backend via `Internal/AudioFormatConverter` + `Internal/SincResampler` (spec `01_SincResampler_Upgrade.md`). No wrapper type; the callback always sees the requested format.
+- ~~**Device selection**~~ — **Resolved** by `20_Audio_Device_Management.md`: `AudioOutputOptions.PreferredDevices` / `SwitchPolicy`, `AudioOutput.GetDeviceManager()`, and library-side auto-recovery.
+- **Error reporting**: Underruns are not counted or surfaced yet. Still open.
 
 ## Alternatives Considered
 

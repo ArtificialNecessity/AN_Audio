@@ -29,9 +29,9 @@ operating system's audio stack.
 | PCM output | `IAudioOutput` / `AudioOutput` | ✅ WASAPI shared, event-driven | ✅ AudioQueue | ✅ ALSA (source) | ◻ AAudio | ◻ AudioQueue | `10_Audio_Bringup.md` |
 | Output device mgmt | `IAudioDeviceManager` | ✅ MMDevice + `IMMNotificationClient` | ✅ property listeners | ✅ hints + reactive loss | ◻ | ◻ | `20_Audio_Device_Management.md` |
 | PCM **input (capture)** | `IAudioInput` / `AudioInput` | ◻ WASAPI capture | ◻ AudioQueue input | ◻ ALSA capture | ◻ AAudio | ◻ | **TBD `40_Audio_Capture.md`** |
-| **MIDI input** | `IMidiInput` / `MidiInput` | ◻ WinMM `midiIn*` (Sprint 1) | ◻ CoreMIDI | ◻ ALSA seq | ◻ `android.media.midi` | ◻ CoreMIDI | `30_MidiInput.md` |
+| **MIDI input** | `IMidiInput` / `MidiInput` | ✅ WinMM `midiIn*` (Sprint 1, hardware-validated) | ◻ CoreMIDI | ◻ ALSA seq | ◻ `android.media.midi` | ◻ CoreMIDI | `30_MidiInput.md` |
 | **MIDI output** | `IMidiOutput` / `MidiOutput` | ◻ WinMM `midiOut*` (Sprint 3) | ◻ CoreMIDI | ◻ ALSA seq | ◻ | ◻ | `30_MidiInput.md` §Sprint 3 (own spec when started) |
-| MIDI device mgmt | `IMidiInput_DeviceManager` | ◻ poll → `WM_DEVICECHANGE` options | ◻ `MIDINotifyProc` | ◻ seq announce port | ◻ | ◻ | `30_MidiInput.md` |
+| MIDI device mgmt | `IMidiInput_DeviceManager` | ✅ 1 s poll + `NotifyDeviceChange()` host hook; library `WM_DEVICECHANGE` window in Sprint 2 | ◻ `MIDINotifyProc` | ◻ seq announce port | ◻ | ◻ | `30_MidiInput.md` |
 | MIDI 2.0 / UMP | same interfaces, richer message struct | ◻ Windows MIDI Services SDK | ◻ CoreMIDI UMP | ◻ ALSA UMP | ◻ | ◻ | later |
 
 ✅ implemented   ◻ planned, interface shaped for it. **Audio capture is in scope**; it has simply not been sprinted yet.
@@ -41,17 +41,24 @@ Earlier documents said "playback only" — that was sprint scope, not library sc
 
 ```
 AN_Audio/
-├── _SPECS/                      00 overview (this), 10 output, 20 devices, 30 MIDI, 40 capture (TBD)
+├── _SPECS/                      00 overview (this), 01 sinc resampler, 10 output, 20 devices, 30 MIDI, 40 capture (TBD)
 ├── _EXTERNAL_APIS/              ground truth read from SDK headers / vendor docs, one file per OS API
 ├── src/AN.Audio/                PCM output + device management
 │   ├── Internal/                format conversion, sinc resampler, shared allocation-free helpers
 │   └── Platforms/{Windows,MacOS,Linux,Android,iOS}/
 ├── src/AN.Audio.Midi/           MIDI in/out — SAME layout: Internal/, Platforms/…
+├── src/AN.Audio.Package/        the ONLY packable project — assembles ArtificialNecessity.Audio (AN.Audio.dll + AN.Audio.Midi.dll)
 ├── tests/AN.Audio.Tests/        xunit, hardware-free
 ├── tests/AN.Audio.Midi.Tests/   xunit, hardware-free (interop layout, ring, parsers)
 ├── tests/SimpleAudioTest/       console smoke with real devices (manual)
-└── tests/SimpleMidiTest/        console smoke with real devices (manual)
+├── tests/SimpleMidiTest/        console smoke with real devices (manual; cmd/test-midi.cmd)
+├── cmd/                         cross-platform C# scripts (dotnet run --file) + .cmd runners: publish-local, nuget-publish-audio, test-midi
+└── AN.Audio.Build.props         timestamp versioning, analyzers, artifacts/ output paths — imported by every csproj
 ```
+
+**Packaging rule:** feature-area projects (`AN.Audio`, `AN.Audio.Midi`, future `AN.Audio.Capture`) are `IsPackable=false`; only
+`AN.Audio.Package` packs. Reference direction is `AN.Audio.Midi → AN.Audio` (never reverse); the package project references both
+with `PrivateAssets=all` and copies their outputs into `lib/<tfm>/` (spec 30 D21).
 
 Every feature-area project mirrors this: public interfaces + factory at the root, `Internal/` for platform-neutral machinery,
 `Platforms/<OS>/` for one backend each (`<Api>Interop.cs` + `<Api><Area>.cs` + `<Api>DeviceManager.cs`).

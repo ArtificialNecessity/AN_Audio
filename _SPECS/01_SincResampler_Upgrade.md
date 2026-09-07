@@ -1,5 +1,12 @@
 # AN.Audio: Upgrade Resampler from Linear Interpolation to Windowed-Sinc
 
+- **Status:** Implemented — `src/AN.Audio/Internal/SincResampler.cs` (`internal sealed class SincResampler(int srcRate, int dstRate, int channels)`,
+  `Process(...)`, `Process(..., out int srcConsumed)`, `EstimateSourceFrames(int outputFrames)`, `Reset()`), wired into `AudioFormatConverter`.
+- **Tests:** `tests/AN.Audio.Tests/SincResamplerTests.cs`, `SincResamplerDiagnosticTests.cs` (8 tests, passing).
+- **As-built note:** the shipped `Process` always consumes ALL supplied source frames (history/ring buffer holds the kernel tail),
+  so `srcConsumed == srcFrames`; callers size input with `EstimateSourceFrames` rather than the "+8 margin" described below.
+- **Parent:** `00_AN_Audio_Overview.md`; part of the `10_Audio_Bringup.md` output path.
+
 ## Problem
 
 The current `AudioFormatConverter` in `AN.Audio/Internal/AudioFormatConverter.cs` uses **simple two-point linear interpolation** for sample rate conversion. This produces audible artifacts:
