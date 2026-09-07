@@ -5,7 +5,7 @@ namespace AN.Audio.Midi.Tests;
 
 public class MidiInput_MessageRingTests
 {
-    private static MidiInput_Message Msg(int n) => new(n, (uint)n, 0x90, (byte)(n & 0x7F), (byte)((n >> 7) & 0x7F), new MidiInput_PortIndex((byte)(n & 0xFF)));
+    private static MidiInput_Message Msg(int n) => MidiInput_Message.FromMidi1(n, n, 0x90, (byte)(n & 0x7F), (byte)((n >> 7) & 0x7F), new MidiInput_PortIndex((byte)(n & 0xFF)));
 
     [Fact]
     public void Empty_ring_dequeues_nothing()

@@ -40,7 +40,7 @@
   <!-- ══════════════════════════════════════════════════════════════════
        Local NuGet feed: set LOCAL_NUGET_REPO env var to deploy packages
        after 'dotnet pack'. Only affects projects with IsPackable=true.
-       Use cmd/publish-local.ps1 to build+pack+deploy in one step.
+       Use cmd/publish-local.cmd (runs cmd/publish-local.cs) to build+pack+deploy in one step.
        ══════════════════════════════════════════════════════════════════ -->
   <PropertyGroup>
     <LocalNuGetFeedPath>$(LOCAL_NUGET_REPO)</LocalNuGetFeedPath>

@@ -139,7 +139,8 @@ internal sealed unsafe class WinMm_MidiInPort
             case WinMm_MidiInMessage.MoreData:
             {
                 WinMm_MidiInterop.UnpackShortMessage(dwParam1, out byte status, out byte d1, out byte d2);
-                var message = new MidiInput_Message(arrival, (uint)dwParam2, status, d1, d2, Index);
+                // D25: WinMM speaks MIDI 1.0 only; wrap as a UMP MT 0x1/0x2 word (shift+or, allocation-free). Group is always 0 (one cable per port).
+                var message = MidiInput_Message.FromMidi1(arrival, (long)(uint)dwParam2, status, d1, d2, Index);
                 if (msg == WinMm_MidiInMessage.MoreData) _owner.NoteDriverLag();
                 _owner.DeliverFromDriver(in message);
                 break;

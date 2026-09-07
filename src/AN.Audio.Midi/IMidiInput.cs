@@ -1,5 +1,3 @@
-using AN.Audio;
-
 namespace AN.Audio.Midi;
 
 /// <summary>
@@ -57,7 +55,7 @@ public interface IMidiInput_DeviceManager : IDisposable
     IReadOnlyList<MidiInput_DeviceInfo> GetInputDevices();
 
     /// <summary>Background thread. Added/Removed; the info is the affected port.</summary>
-    event Action<DeviceChangeType, MidiInput_DeviceInfo?>? DeviceListChanged;
+    event Action<MidiInput_DeviceChangeType, MidiInput_DeviceInfo?>? DeviceListChanged;
 
     /// <summary>Host-supplied hint that the device list may have changed (e.g. from WM_DEVICECHANGE). Triggers an immediate re-enumeration.</summary>
     void NotifyDeviceChange();

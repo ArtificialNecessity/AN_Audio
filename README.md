@@ -85,15 +85,17 @@ midi.Start();
 // In your audio callback (exactly one consumer thread), drain BEFORE rendering the block:
 while (midi.Ring.TryDequeue(out var m))
 {
-    if (m.IsNoteOn)       synth.NoteOn(m.Note.Number, m.Velocity.Normalized0To1);
+    if (m.IsNoteOn)       synth.NoteOn(m.Note.Number, m.VelocityNormalized);   // 16-bit-derived, MIDI 1.0 or 2.0
     else if (m.IsNoteOff) synth.NoteOff(m.Note.Number);
 }
 ```
 
+**MIDI 2.0-ready contract.** `MidiInput_Message` exposes only typed accessors — never raw bytes. Two tiers: native 7/14-bit (`Velocity7`, `ControllerValue7`, `PitchBend14`; exact for MIDI 1.0 gear) and protocol-neutral 16/32-bit (`Velocity16`, `ControllerValue32`, `PitchBend32`; exact for MIDI 2.0, spec-defined Min-Center-Max upscale for MIDI 1.0). `m.Protocol` tells you which tier is native. Write against the wide tier and a future UMP backend (Windows MIDI Services, CoreMIDI, ALSA) changes nothing in your code. Encoder/CC semantics (relative modes, 14-bit pairs, mappings) are the app's job; `Midi_RelativeDecode` offers the standard decoders.
+
 | Type | Purpose |
 |------|---------|
-| `MidiInput_Message` | 16-byte blittable short message: `ArrivalTicks` (Stopwatch), `DriverTimestamp`, raw `Status`/`Data1`/`Data2`, `Port`; helpers `Kind`, `Channel`, `IsNoteOn`, `IsNoteOff`, `PitchBend14` |
-| `MidiInput_MessageRing` | Lock-free SPSC queue filled by the driver thread; grows from `RingInitialCapacity` to `RingMaxCapacity`, then drops newest and counts (`DroppedCount`, `LagCount`, `GrowCount`) |
+| `MidiInput_Message` | 32-byte blittable message stored as UMP words: `ArrivalTicks` (Stopwatch), 64-bit `DriverTimestamp`, `Port`, `Group`, `Protocol`; accessors `Kind`, `Channel`, `IsNoteOn`, `IsNoteOff`, `Note`, `Velocity7`/`Velocity16`, `Controller`, `ControllerValue7`/`ControllerValue32`, `PitchBend14`/`PitchBend32`, `IsRelativeController`/`RelativeDelta32` |
+| `MidiInput_MessageRing` | Lock-free SPSC queue filled by the driver thread; grows from `RingInitialCapacity` to `RingMaxCapacity` (default 16384 × 32 B = 512 KB), then drops newest and counts (`DroppedCount`, `LagCount`, `GrowCount`) |
 | `MidiInput_Callback` | Alternative raw delivery on the driver thread (`Start(callback)`); same rules as `AudioCallback` |
 | `MidiInput_DeviceInfo` | `Key` (per-port instance, persist this), `TypeId` (per device model, from SysEx Identity Reply), display `Name`, `Identity` |
 | `IMidiInput_DeviceManager` | Enumerate ports and get `DeviceListChanged` (polled once/second on WinMM, which has no notification) |
@@ -121,7 +123,7 @@ dotnet build
 
 ```
 $env:LOCAL_NUGET_REPO = "C:\path\to\local\feed"
-./cmd/publish-local.ps1
+cmd\publish-local.cmd            # or: dotnet run --file cmd/publish-local.cs
 ```
 
 This builds, packs `ArtificialNecessity.Audio`, and deploys the `.nupkg` to your local feed. Versioning is automatic (timestamp-based).
@@ -146,7 +148,9 @@ AN.Audio/
 │   # Internal/ contains AudioFormatConverter and SincResampler.
 ├── src/AN.Audio.Midi/               # MIDI input (AN.Audio.Midi.dll) — same layout: Internal/, Platforms/Windows/
 │   ├── IMidiInput.cs                # IMidiInput + IMidiInput_DeviceManager
-│   ├── MidiInput_Message.cs         # 16-byte hot-path message + MidiInput_Callback
+│   ├── MidiInput_Message.cs         # UMP-word hot-path message (MIDI 1.0 + 2.0 accessors) + MidiInput_Callback
+│   ├── Midi_Wire.cs                 # MIDI 1.0 / UMP / MIDI 2.0 wire vocabulary enums
+│   ├── Midi_RelativeDecode.cs       # stateless encoder-delta decoders (app decides which applies)
 │   ├── MidiInput_MessageRing.cs     # growable SPSC queue (driver thread → your audio thread)
 │   └── Platforms/Windows/           # WinMM midiIn*/midiOut* interop, port, input, device manager
 ├── src/AN.Audio.Package/            # The ONLY packable project: builds the ArtificialNecessity.Audio nupkg (both DLLs)
@@ -156,8 +160,8 @@ AN.Audio/
 ├── tests/AN.Audio.Midi.Tests/        # Automated tests: message decode, ring, SysEx, interop layout
 ├── AN.Audio.Build.props             # Shared build infrastructure (timestamp versioning v2)
 └── cmd/
-    ├── publish-local.ps1            # Build + pack + deploy to local feed
-    ├── nuget-publish-audio.ps1      # Build + pack + push to NuGet.org
+    ├── publish-local.cs / .cmd      # Build + pack + deploy to local feed (cross-platform C# script)
+    ├── nuget-publish-audio.cs / .cmd # Build + pack + push to NuGet.org
     └── test-midi.cmd                # Run the interactive MIDI smoke test
 ```
 

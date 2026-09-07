@@ -6,11 +6,13 @@
 - **Sibling specs:** `10_Audio_Bringup.md`, `20_Audio_Device_Management.md`
 
 - [x] Sprint 1 — Windows/WinMM input: enumerate, open-all, short messages, SysEx Identity Request/Reply, polling hot-plug, ring + raw callback, tests (55 xunit + `SimpleMidiTest` on Akai MPK mini IV)
+- [x] Sprint 1b (2026-09-07) — D24 drop `AN.Audio` dependency; D25 MIDI 2.0-ready `MidiInput_Message` (UMP-word storage, `Protocol`, 64-bit `DriverTimestamp`, two accessor tiers, raw fields internal); D26 `Midi_RelativeDecode` / `Midi_BitScaling`; 109 xunit
 - [ ] Sprint 2 — Hot-plug options: host `WM_DEVICECHANGE` hook; library-owned hidden window on a side thread
 - [ ] Sprint 3 — `IMidiOutput` (full send path: short + SysEx), Windows
 - [ ] Sprint 4 — macOS CoreMIDI, Linux ALSA-seq (input, then output)
 - [ ] Sprint 5 — Android (`android.media.midi`), iOS (CoreMIDI) once AN.Audio itself has those platforms
-- [ ] Later — Windows MIDI Services / MIDI 2.0 UMP backend behind the same interface
+- [ ] Later — Windows MIDI Services App SDK / MIDI 2.0 UMP backend behind the same interface (`MidiInput_Message.FromUmp` is the entry point; no consumer change, D25)
+- [ ] Later — MIDI-CI Discovery + Property Exchange `DeviceInfo` (per-unit serial), needs Sprint 3 output; see `_EXTERNAL_APIS/UMP_MIDI2_Format.md` §MIDI-CI
 
 ## 1. Overview
 
@@ -30,7 +32,7 @@ policy opens every input port, merges them into one stream, and hot-plug arrival
 | D4 | Delivery to consumer | **Both**: `IMidiInput.Ring` (library-owned SPSC `MidiInput_MessageRing`, default) and an optional raw `MidiInput_Callback`. | The consumer's audio thread drains the ring with `TryDequeue` — this is the driver-thread → audio-thread hand-off; apps needing zero-copy fan-out use the raw callback. |
 | D5 | Drop policy | Ring grows from `RingInitialCapacity` to `RingMaxCapacity` (D23); only when **at max and full** is **the newest message dropped and `DroppedCount` incremented**; `Overflow` event fires (rate-limited) on a background thread. Never blocks the driver thread. In raw-callback mode the ring is unused: `DroppedCount` stays 0 and `Overflow` never fires. | Spec 17 wants nothing dropped; 16384 × 16 B = 256 KB is enormous burst headroom, and a counter makes any drop visible instead of silent. |
 | D6 | Timestamps | Every message carries `ArrivalTicks` (`Stopwatch.GetTimestamp()` at callback entry) AND `DriverTimestamp` (backend-native; WinMM = ms since Start). | WinMM's 1 ms clock is too coarse for audio-frame correlation; CoreMIDI's host-time isn't. The library never knows the audio clock — correlation is the app's job. |
-| D7 | Message model | 16-byte blittable `MidiInput_Message` for all **short** messages (channel voice/mode, system common, real-time). SysEx is a **separate** path (`MidiInput_SysExMessage` with pooled `byte[]`, delivered on a background thread, not through the ring). | Keeps the hot path fixed-size and allocation-free; SysEx is rare and never latency-critical. |
+| D7 | Message model | Blittable `MidiInput_Message` (**superseded by D25** for layout and accessors: UMP-word storage, 32 bytes, raw fields internal) for all **short** messages (channel voice/mode, system common, real-time). SysEx is a **separate** path (`MidiInput_SysExMessage` with pooled `byte[]`, delivered on a background thread, not through the ring). | Keeps the hot path fixed-size and allocation-free; SysEx is rare and never latency-critical. |
 | D8 | SysEx scope (Sprint 1) | Receive any SysEx (reassembled), but the only **sent** SysEx is Universal Identity Request; `IMidiInput.RequestIdentity(port)` and `MidiInput_DeviceInfo.Identity` (manufacturer id, family, member, revision) populated from the reply. | User: identify gear. Requires a minimal out-port open on the same device (D9). |
 | D9 | Output in Sprint 1 | `Internal` only, per request: `midiOutOpen` the paired out port (`CALLBACK_FUNCTION`), `midiOutLongMsg` the 6-byte request from a pinned header, `midiOutUnprepareHeader` + `midiOutClose` on `MOM_DONE`. The reply arrives asynchronously on the IN port; 500 ms timeout. **Any failure (`MMSYSERR_ALLOCATED` on the out port, no `MOM_DONE`, no reply) is silent**: `Identity` stays null, `TypeId.IsUnknownType = true`, `IdentityResolved` does not fire, and it is never reported as `DeviceLost`. No public `IMidiOutput` until Sprint 3. | Smallest surface that satisfies D8; holding an extra exclusive out handle under legacy WinMM would block other apps. Lifecycle to be validated with real hardware (§8). |
 | D10 | Hot-plug v1 | Background poll thread, `PollIntervalMs` default 1000 (option). Diff by `MidiInput_DeviceKey`. | WinMM has no notification. Sprint 2 adds `MidiInput_HotPlugSource { Poll, HostSupplied, LibraryWindow }`: host calls `MidiInput.NotifyDeviceChange()` from its own `WM_DEVICECHANGE`; or `MidiInput.StartDeviceChangeWindow()` spins a message-only HWND on a side thread. |
@@ -46,7 +48,10 @@ policy opens every input port, merges them into one stream, and hot-plug arrival
 | D20 | SysEx size cap | `Midi_SysExReassembler` is bounded by `MidiInput_Options.SysExMaxBytes` (default 64 KB). A message exceeding it is discarded, `SysExReceived` is not fired, and a `SysExDiscardedCount` increments. Pooled `byte[]` never grows past the cap. | Bulk dumps can be arbitrarily long; the cold path must still be memory-bounded. User approved 2026-09-07. |
 | D21 | Packaging mechanics | New thin **`src/AN.Audio.Package/AN.Audio.Package.csproj`** is the ONLY `IsPackable=true` project: `PackageId=ArtificialNecessity.Audio`, `ProjectReference` to `AN.Audio` and `AN.Audio.Midi` with `PrivateAssets="all"`, `TargetsForTfmSpecificBuildOutput` copies both DLLs into `lib/<tfm>/`. `AN.Audio.csproj` becomes `IsPackable=false`; README/LICENSE pack items and `<Description>` move to the package project; both `cmd/*publish*.ps1` pack the package project. Verify by unzipping the nupkg in Sprint 1. | `AN.Audio.Midi` → `AN.Audio` is the only reference direction; a pack recipe inside `AN.Audio.csproj` would need the reverse reference (circular). User approved 2026-09-07. |
 | D22 | `MIDI_IO_STATUS` / `MIM_MOREDATA` | Open with `MIDI_IO_STATUS` by default (`MidiInput_Options.EnableIoStatus`). `MIM_MOREDATA` **is delivered exactly like `MIM_DATA`** (it is real data) and increments `MidiInput_MessageRing.LagCount`. It never touches `DroppedCount`. | `DroppedCount` means "we discarded a message" and nothing else; driver-reported lag is a separate, visible signal. User rule 2026-09-07. |
-| D23 | Growable ring | `MidiInput_MessageRing` is an **encapsulated, growable** SPSC queue: `RingInitialCapacity` (default 1024) up to `RingMaxCapacity` (default 16384 = 256 KB of 16-byte messages; `Max == Initial` means fixed). **No power-of-two requirement** (modulo instead of mask; irrelevant cost). Internally a circular linked list of fixed-size segments (segment size = initial capacity): when the tail segment is full and the next segment is still the consumer's, the producer (driver thread) inserts one more segment with a single `Volatile.Write` — nothing is copied, the consumer simply follows `Next` after draining. Segments the consumer has LEFT are reused, never freed, so once the queue has grown to its working size the steady state is allocation-free. At `MaxCapacity` the D5 drop-newest rule applies. **Guarantee:** the producer may only reuse a segment the consumer has left (writing into the consumer's current segment would reorder), and the consumer leaves a drained segment on its next dequeue — so the guaranteed undropped backlog is `Max − Initial` (default 15360), not `Max`. Consumers never see storage; only `TryDequeue`/`DequeueAll` and the counters (`CurrentCapacity`, `GrowCount`, `DroppedCount`, `LagCount`). | User preference 2026-09-07: a bounded number of allocations while converging to stability is acceptable; a per-loop allocation is not. Segments (not realloc+copy) because the consumer may be mid-dequeue when the producer grows. Optional future refinement: a background thread pre-allocates one spare segment so the driver thread never allocates. |
+| D23 | Growable ring | `MidiInput_MessageRing` is an **encapsulated, growable** SPSC queue: `RingInitialCapacity` (default 1024) up to `RingMaxCapacity` (default 16384 = 512 KB of 32-byte messages, D25; `Max == Initial` means fixed). **No power-of-two requirement** (modulo instead of mask; irrelevant cost). Internally a circular linked list of fixed-size segments (segment size = initial capacity): when the tail segment is full and the next segment is still the consumer's, the producer (driver thread) inserts one more segment with a single `Volatile.Write` — nothing is copied, the consumer simply follows `Next` after draining. Segments the consumer has LEFT are reused, never freed, so once the queue has grown to its working size the steady state is allocation-free. At `MaxCapacity` the D5 drop-newest rule applies. **Guarantee:** the producer may only reuse a segment the consumer has left (writing into the consumer's current segment would reorder), and the consumer leaves a drained segment on its next dequeue — so the guaranteed undropped backlog is `Max − Initial` (default 15360), not `Max`. Consumers never see storage; only `TryDequeue`/`DequeueAll` and the counters (`CurrentCapacity`, `GrowCount`, `DroppedCount`, `LagCount`). | User preference 2026-09-07: a bounded number of allocations while converging to stability is acceptable; a per-loop allocation is not. Segments (not realloc+copy) because the consumer may be mid-dequeue when the producer grows. Optional future refinement: a background thread pre-allocates one spare segment so the driver thread never allocates. |
+| D24 | No `AN.Audio` dependency | `AN.Audio.Midi` has **no `ProjectReference` to `AN.Audio`**. The only thing it used was the `DeviceChangeType` enum; it now has its own `MidiInput_DeviceChangeType { Added, Removed }` (D13 naming). The umbrella package (D21) is kept as the packaging vehicle because neither library project should carry pack metadata, but it is no longer *forced* by a circular reference. | User 2026-09-07: the dependency was "not necessary". A 60 KB DLL should not drag in another 60 KB DLL for one enum. |
+| D25 | **MIDI 2.0-ready message contract** | `MidiInput_Message` is redefined so that a future UMP backend (Windows MIDI Services SDK, CoreMIDI UMP, ALSA UMP) can fulfil the **same public contract** with no consumer change. Rules: (1) **Raw wire fields (`Status`, `Data1`, `Data2`) are no longer public** — consumers use typed accessors only. (2) The struct stores the message as **UMP words** (`Word0`, `Word1`, internal) plus `Protocol : Midi_Protocol { Midi1, Midi2 }` — what the device actually sent (UMP MT 0x1/0x2 → Midi1, MT 0x4 → Midi2). (3) `DriverTimestamp` becomes **`long`** (WinMM ms fits; SDK/CoreMIDI 64-bit clocks need it). (4) `Group : Midi_Group` (0..15) is present; WinMM always reports group 0 — the WinMM *port* is the cable; a UMP backend maps `(endpoint, group)` → one `MidiInput_PortIndex` slot so `Port` semantics are unchanged. (5) **Two accessor tiers**: *native-resolution* — `Velocity7`, `ControllerValue7`, `PitchBend14`, `Pressure7` (exact wire values when `Protocol == Midi1`; truncating downscale when `Midi2`); *protocol-neutral* — `Velocity16`, `ControllerValue32`, `PitchBend32`, `Pressure32` (exact when `Midi2`; **Min-Center-Max upscale** per M2-115-U when `Midi1` — reversible, so nothing is lost). Plus `IsRelativeController` / `RelativeDelta32` (signed) for MIDI 2.0 Relative Registered/Assignable Controller messages, which the wire itself declares relative. (6) The WinMM backend converts each 3-byte short message to a MT 0x1/0x2 word at decode time (a shift+or, allocation-free). (7) **Struct size is an implementation detail** asserted by test (`Unsafe.SizeOf`), no longer a public promise; D7's "never add fields" is retired. `MidiInput_MessageRing` capacity semantics (D5/D23) are unchanged; memory per message roughly doubles (32 B; default ring max 16384 × 32 B = 512 KB). | User 2026-09-07: "every line of MusicStudio code I write against the 1.0 shape has to be rewritten later" — the accessor *types* are the API and must be 2.0-sized now; the wire format is not. Ground truth `_EXTERNAL_APIS/UMP_MIDI2_Format.md`: Windows MIDI Services does **not** upscale MT2→MT4, so 1.0 devices' 7-bit values survive intact through every backend; `Protocol` tells the consumer which tier is native. |
+| D26 | Controller semantics are **above** the library | Everything that needs knowledge the wire does not carry — relative-encoder encodings (two's-complement 7, binary-offset-64, sign-magnitude, vendor "delegate" modes), 14-bit CC MSB/LSB pairing, RPN/NRPN CC-sequence assembly, knob→parameter mappings — is **out of scope** for `AN.Audio.Midi`. The library reports values faithfully (D15/D25) and ships only **stateless, pure helpers** as vocabulary: `Midi_RelativeDecode.TwosComplement7(byte)`, `.BinaryOffset64(byte)`, `.SignMagnitude(byte)` and `Midi_BitScaling.Upscale(value, srcBits, dstBits)` / `.Downscale(...)`. The consumer (MusicStudio) owns per-`TypeId` device profiles. When MIDI-CI Property Exchange arrives, the library will *report* `ControllerResources` metadata (`type: relative`, `numSigBits`) as device info for the consumer's profile layer to consume — still above us. | User 2026-09-07: "CC mapping happens above us, we just report the values." MIDI 2.0 solved signed deltas only for Relative RC/AC (32-bit two's complement, M2-104 §7.4.8), *not* for plain CC and *not* translatable from 1.0 — so a receiver-side profile remains necessary and belongs in the app. |
 
 `DroppedCount` invariant: it increments **only** when this library discards a message it received (ring full, D5; SysEx over cap, D20 — via its own counter). Never for driver-side conditions.
 
@@ -77,21 +82,47 @@ public readonly record struct Midi_Note(byte Number);            // 60 = C4
 public readonly record struct Midi_Velocity(byte Value) { float Normalized0To1 }
 public readonly record struct Midi_ManufacturerId(int Value, bool IsExtended);   // 1- or 3-byte SysEx manufacturer id
 
-// ---- the one struct on the hot path (16 bytes, blittable) -------------------------------
-[StructLayout(LayoutKind.Sequential)]                          // size asserted == 16 by test; never add fields
-public readonly record struct MidiInput_Message
+// ---- UMP / MIDI 2.0 vocabulary (D25) -------------------------------------------------------
+public enum Midi_Protocol : byte { Midi1 = 1, Midi2 = 2 }                 // what the DEVICE sent; decides which accessor tier is native
+public readonly record struct Midi_Group(byte Index0To15) { int DisplayNumber1To16 }   // WinMM always 0
+public enum Midi_UmpMessageType : byte { Utility = 0x0, SystemCommonRealTime = 0x1, Midi1ChannelVoice = 0x2, Data64 = 0x3, Midi2ChannelVoice = 0x4, Data128 = 0x5, FlexData = 0xD, UmpStream = 0xF }
+public enum Midi_Midi2Opcode : byte { RegisteredPerNoteController = 0x0, AssignablePerNoteController = 0x1, RegisteredController = 0x2, AssignableController = 0x3,
+                                      RelativeRegisteredController = 0x4, RelativeAssignableController = 0x5, PerNotePitchBend = 0x6, NoteOff = 0x8, NoteOn = 0x9, PolyPressure = 0xA,
+                                      ControlChange = 0xB, ProgramChange = 0xC, ChannelPressure = 0xD, PitchBend = 0xE, PerNoteManagement = 0xF }
+public enum Midi_NoteAttributeType : byte { None = 0, ManufacturerSpecific = 1, ProfileSpecific = 2, Pitch7_9 = 3 }
+public readonly record struct Midi_Velocity16(ushort Value) { float Normalized0To1 }
+public readonly record struct Midi_Value32(uint Value)      { float Normalized0To1 }
+public readonly record struct Midi_PitchBend32(uint Value)  { static readonly uint Centre = 0x80000000; float NormalizedMinus1To1 }
+public static class Midi_RelativeDecode { static int TwosComplement7(byte); static int BinaryOffset64(byte); static int SignMagnitude(byte); static int SignMagnitudeInverted(byte); }   // D26: vocabulary only
+
+// ---- the one struct on the hot path (blittable; 32 bytes asserted by test — NOT a public promise, D25) ----
+[StructLayout(LayoutKind.Sequential)]
+public readonly struct MidiInput_Message
 {
-    public long   ArrivalTicks   { get; }   // Stopwatch.GetTimestamp() at callback entry (D6)
-    public uint   DriverTimestamp{ get; }   // backend-native (WinMM: ms since Start)
-    public byte   Status         { get; }   // raw, channel in low nibble for channel messages
-    public byte   Data1          { get; }
-    public byte   Data2          { get; }
-    public MidiInput_PortIndex Port { get; } // byte-sized index into IMidiInput.OpenPorts
-    public Midi_MessageKind Kind => …;  public Midi_Channel Channel => …;
-    public bool IsNoteOn  => Kind == Midi_MessageKind.NoteOn && Data2 != 0;
-    public bool IsNoteOff => Kind == Midi_MessageKind.NoteOff || (Kind == Midi_MessageKind.NoteOn && Data2 == 0);
-    public Midi_Note Note => new(Data1); public Midi_Velocity Velocity => new(Data2);
-    public int PitchBend14 => (Data2 << 7) | Data1;   // 0..16383, 8192 = centre
+    public long ArrivalTicks { get; }         // Stopwatch.GetTimestamp() at callback entry (D6)
+    public long DriverTimestamp { get; }      // backend-native 64-bit (WinMM: ms since Start; SDK/CoreMIDI: host clock)
+    internal uint Word0 { get; } internal uint Word1 { get; }   // UMP words — raw wire is NOT public
+    public MidiInput_PortIndex Port { get; }  // byte-sized slot; a UMP backend maps (endpoint, group) → slot
+    public Midi_Protocol Protocol { get; }
+
+    public static MidiInput_Message FromMidi1(long arrival, long driverTs, byte status, byte d1, byte d2, MidiInput_PortIndex port, Midi_Group group = default);   // → MT 0x1/0x2
+    public static MidiInput_Message FromUmp(long arrival, long driverTs, uint word0, uint word1, MidiInput_PortIndex port);                                      // MT 0x1/0x2/0x4
+
+    // addressing
+    public Midi_UmpMessageType MessageType; public Midi_Group Group; public Midi_Channel Channel; public Midi_MessageKind Kind; public Midi_Midi2Opcode Midi2Opcode; public Midi_Status SystemStatus;
+    public bool IsChannelMessage; public bool IsSystemMessage;
+    // notes  — IsNoteOff folds MIDI 1.0 velocity-0 note-on (D15); for MIDI 2.0 velocity 0 is a real note-on
+    public bool IsNoteOn; public bool IsNoteOff; public Midi_Note Note;
+    public Midi_Velocity Velocity7;  public Midi_Velocity16 Velocity16;  public float VelocityNormalized;     // native 7-bit | protocol-neutral 16-bit
+    public Midi_NoteAttributeType NoteAttributeType; public ushort NoteAttributeData;
+    // controllers — the library reports; interpretation (encoders, 14-bit pairs) is the consumer's (D26)
+    public Midi_Controller Controller; public byte ControllerValue7; public Midi_Value32 ControllerValue32;
+    public bool IsRelativeController; public int RelativeDelta32;                                            // MIDI 2.0 Relative RC/AC only (wire-declared)
+    public byte RegisteredControllerBank; public byte RegisteredControllerIndex;
+    // program / bend
+    public byte Program; public int PitchBend14; public Midi_PitchBend32 PitchBend32;
+    // diagnostics only (monitors/loggers)
+    public (uint Word0, uint Word1) RawUmpWords; public (byte Status, byte Data1, byte Data2) RawMidi1Bytes;
 }
 public readonly record struct MidiInput_PortIndex(byte Value);
 
@@ -177,7 +208,7 @@ public static class MidiInput
 }
 ```
 
-`AN.Audio.Midi` references `AN.Audio` (for `DeviceChangeType` and the `Internal` allocation-free helpers). No reverse reference — which is why the nupkg is assembled by `AN.Audio.Package` (D21), not by `AN.Audio.csproj`.
+`AN.Audio.Midi` has **no reference to `AN.Audio`** (D24). The nupkg is still assembled by `AN.Audio.Package` (D21) so that neither library project carries pack metadata.
 
 ## 4. Consumer sketch (MusicStudio `MusicAudioHost`)
 

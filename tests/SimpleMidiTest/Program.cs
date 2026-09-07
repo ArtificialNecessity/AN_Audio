@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using AN.Audio;
 using AN.Audio.Midi;
 
 // SimpleMidiTest — manual hardware smoke test for SPEC-30 Sprint 1.
@@ -60,7 +59,8 @@ var drainThread = new Thread(() =>
             double sinceStartMs = (m.ArrivalTicks - startTicks) * 1000.0 / Stopwatch.Frequency;
             string portName = midi.TryGetPort(m.Port, out var info) ? info.Name : $"port{m.Port.Value}";
             var colour = m.IsNoteOn ? ConsoleColor.White : m.IsNoteOff ? ConsoleColor.Gray : ConsoleColor.DarkCyan;
-            Log(colour, $"{sinceStartMs,10:F3}ms  drv={m.DriverTimestamp,8}ms  [{portName}]  {m.Status:X2} {m.Data1:X2} {m.Data2:X2}  {m}");
+            var (st, d1, d2) = m.RawMidi1Bytes;   // diagnostics only (D25) — musical code uses typed accessors
+            Log(colour, $"{sinceStartMs,10:F3}ms  drv={m.DriverTimestamp,8}ms  [{portName}]  {st:X2} {d1:X2} {d2:X2}  {m}");
         }
         if (n == 0) Thread.Sleep(2);
     }

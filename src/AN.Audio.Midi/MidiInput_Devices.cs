@@ -75,6 +75,13 @@ public enum MidiInput_LostReason
     Stopped,
 }
 
+/// <summary>Kind of change reported by <see cref="IMidiInput_DeviceManager.DeviceListChanged"/>. MIDI-scoped so AN.Audio.Midi has no dependency on AN.Audio (SPEC-30 D24).</summary>
+public enum MidiInput_DeviceChangeType
+{
+    Added,
+    Removed,
+}
+
 public enum MidiInput_OpenPolicy
 {
     /// <summary>Open every input port; hot-plug arrivals join automatically (default).</summary>

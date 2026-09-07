@@ -16,8 +16,4 @@
     <InternalsVisibleTo Include="AN.Audio.Midi.Tests" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\AN.Audio\AN.Audio.csproj" />
-  </ItemGroup>
-
 </Project>

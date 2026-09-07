@@ -1,5 +1,3 @@
-using AN.Audio;
-
 namespace AN.Audio.Midi.Platforms.Windows;
 
 /// <summary>
@@ -18,7 +16,7 @@ internal sealed class WinMm_MidiInDeviceManager : IMidiInput_DeviceManager
     private Dictionary<MidiInput_DeviceKey, MidiInput_DeviceInfo> _known = new();
     private Thread? _poller;
     private volatile bool _disposed;
-    private Action<DeviceChangeType, MidiInput_DeviceInfo?>? _deviceListChanged;
+    private Action<MidiInput_DeviceChangeType, MidiInput_DeviceInfo?>? _deviceListChanged;
 
     private WinMm_MidiInDeviceManager() { }
 
@@ -30,7 +28,7 @@ internal sealed class WinMm_MidiInDeviceManager : IMidiInput_DeviceManager
         return list;
     }
 
-    public event Action<DeviceChangeType, MidiInput_DeviceInfo?>? DeviceListChanged
+    public event Action<MidiInput_DeviceChangeType, MidiInput_DeviceInfo?>? DeviceListChanged
     {
         add
         {
@@ -87,13 +85,13 @@ internal sealed class WinMm_MidiInDeviceManager : IMidiInput_DeviceManager
             if (handler is null) continue;
 
             foreach (var (key, info) in previous)
-                if (!current.ContainsKey(key)) SafeInvoke(handler, DeviceChangeType.Removed, info);
+                if (!current.ContainsKey(key)) SafeInvoke(handler, MidiInput_DeviceChangeType.Removed, info);
             foreach (var (key, info) in current)
-                if (!previous.ContainsKey(key)) SafeInvoke(handler, DeviceChangeType.Added, info);
+                if (!previous.ContainsKey(key)) SafeInvoke(handler, MidiInput_DeviceChangeType.Added, info);
         }
     }
 
-    private static void SafeInvoke(Action<DeviceChangeType, MidiInput_DeviceInfo?> handler, DeviceChangeType type, MidiInput_DeviceInfo info)
+    private static void SafeInvoke(Action<MidiInput_DeviceChangeType, MidiInput_DeviceInfo?> handler, MidiInput_DeviceChangeType type, MidiInput_DeviceInfo info)
     {
         try { handler(type, info); } catch { }
     }
