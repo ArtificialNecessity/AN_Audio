@@ -1,6 +1,6 @@
 # SPEC-10 AN.Audio initial bringup: PCM output via direct PInvoke
 
-**Status:** Implemented (Windows, macOS, Linux); Android/iOS and mixer pending  
+**Status:** Implemented (Windows, macOS, Linux); Android/iOS pending  
 **Last Updated:** 2026-09-07  
 **Parent:** `00_AN_Audio_Overview.md` — the library's goal and invariants live there, not here.
 
@@ -13,7 +13,6 @@
 - [x] Milestone 2 — Linux ALSA backend (implemented in source; runtime availability depends on ALSA + a usable device)
 - [x] Milestone 3 — macOS CoreAudio backend
 - [ ] Milestone 4 — Android AAudio backend (future)
-- [ ] Milestone 5 — Simple mixer for layered playback (not started; per `00_AN_Audio_Overview.md` "Non-goals", mixing is above this library — this milestone may be retired)
 
 ## Overview
 
@@ -110,7 +109,7 @@ public static class AudioOutput
 }
 ```
 
-The `AudioCallback` is the only extension point. Consumers write PCM into the provided buffer. The mixer (Milestone 5) is just a callback that sums multiple source callbacks — it's above this layer, not inside it.
+The `AudioCallback` is the only extension point. Consumers write PCM into the provided buffer. Anything that sums multiple sources (a mixer) is just another callback — see `00_AN_Audio_Overview.md` "Possible future additions".
 
 ### Buffer Size and Latency
 
@@ -420,44 +419,6 @@ This backend is deferred until Mirica or Arcane Siege targets Android. The abstr
 
 ---
 
-## Mixer (Milestone 5)
-
-The mixer is NOT part of the platform backends. It sits above `IAudioOutput` as a callback that sums multiple sources:
-
-```csharp
-// pseudocode — illustrative only
-
-public class AudioMixer
-{
-    private readonly List<IAudioSource> _sources = new();
-    
-    public int MixCallback(Span<byte> buffer, int frameCount, AudioFormat format)
-    {
-        // zero the buffer
-        buffer.Clear();
-        
-        // accumulate each source (in float32, then clamp)
-        foreach (var source in _sources)
-        {
-            source.ReadFrames(tempBuffer, frameCount);
-            // add tempBuffer into buffer with volume scaling
-        }
-        return frameCount;
-    }
-}
-
-public interface IAudioSource
-{
-    void ReadFrames(Span<float> buffer, int frameCount);
-    float Volume { get; set; }
-    bool IsPlaying { get; }
-}
-```
-
-Sources can be: decoded audio clips (WAV/OGG loaded into memory), streaming decoders, procedural generators (sine waves, noise for UI). The mixer does its work in float32 and converts to the output format at the end if needed.
-
----
-
 ## Threading Model
 
 Each backend creates exactly one dedicated audio thread. The thread's only job is to wait for the OS event (WASAPI event, ALSA poll, AudioQueue callback) and invoke the `AudioCallback`. The callback must be fast — no allocations, no locks that contend with the main thread, no I/O.
@@ -472,7 +433,7 @@ Rules for callback implementors:
 
 ## Project Structure
 
-As built (mixer not built — see Milestone 5):
+As built:
 
 ```
 src/AN.Audio/
@@ -493,7 +454,6 @@ src/AN.Audio/
 │   └── MacOS/
 │       ├── CoreAudioOutput.cs, CoreAudioDeviceManager.cs
 │       └── AudioToolboxInterop.cs, CoreAudioInterop.cs
-└── (Mixer/ — NOT built; Milestone 5 remains open and may live above this library entirely)
 
 src/AN.Audio.Midi/               // MIDI input, spec 30 — same layout
 src/AN.Audio.Package/            // the only packable project; produces the ArtificialNecessity.Audio nupkg with both DLLs

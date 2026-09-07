@@ -76,8 +76,17 @@ Every feature-area project mirrors this: public interfaces + factory at the root
 
 ## Non-goals (permanently above this layer)
 
-Mixing, decoding (WAV/MP3/OGG), resampling as a service (we resample only to satisfy a requested output format), effects, sequencing,
+Decoding (WAV/MP3/OGG), resampling as a service (we resample only to satisfy a requested output format), effects, sequencing,
 MIDI file I/O, virtual/loopback ports (until an OS offers them natively), plugin hosting.
+
+## Possible future additions (not committed, not specced)
+
+- **Simple mixer** — a helper (`AudioMixer` + `IAudioSource`) that is itself just an `AudioCallback`: sums N float sources with
+  per-source volume and hands one buffer to `IAudioOutput`. It touches no OS API, so it would be a small platform-neutral
+  addition rather than a feature area. Originally sketched as Milestone 5 of `10_Audio_Bringup.md`, removed from that spec
+  2026-09-07 because it is not part of bringup. If a consumer (Arcane Siege layered SFX, Mirica UI sounds over TTS) needs it,
+  it gets its own short spec; until then consumers sum their sources in their own callback.
+- **Underrun counters** on `IAudioOutput` (open question in spec 10).
 
 ## Consumers today
 
