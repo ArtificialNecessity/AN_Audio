@@ -9,6 +9,8 @@ public class Midi_SysExTests
     // Fixtures
     private static readonly byte[] ArturiaReply = [0xF0, 0x7E, 0x00, 0x06, 0x02, 0x00, 0x20, 0x6B, 0x02, 0x00, 0x05, 0x00, 0x01, 0x00, 0x02, 0x00, 0xF7];
     private static readonly byte[] RolandReply   = [0xF0, 0x7E, 0x10, 0x06, 0x02, 0x41, 0x0B, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0xF7];
+    // Captured from an M-Audio Oxygen 49 MKV 2026-09-08: 3-byte manufacturer id but only TWO revision bytes (non-spec, must still parse).
+    private static readonly byte[] OxygenReply   = [0xF0, 0x7E, 0x7F, 0x06, 0x02, 0x00, 0x01, 0x05, 0x00, 0x02, 0x30, 0x30, 0x35, 0x30, 0xF7];
 
     [Fact]
     public void Request_bytes_match_spec()
@@ -44,7 +46,27 @@ public class Midi_SysExTests
     {
         Assert.False(Midi_IdentityReplyParser.TryParse([0xF0, 0x43, 0x10, 0x4C, 0x00, 0x00, 0x7E, 0x00, 0xF7], out _));
         Assert.False(Midi_IdentityReplyParser.TryParse([0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7], out _));   // the request itself
-        Assert.False(Midi_IdentityReplyParser.TryParse(ArturiaReply.AsSpan(0, 10), out _));             // truncated
+        Assert.False(Midi_IdentityReplyParser.TryParse(ArturiaReply.AsSpan(0, 10), out _));             // truncated (no F7)
+    }
+
+    [Fact]
+    public void Parses_MAudio_Oxygen_reply_with_short_revision()
+    {
+        Assert.True(Midi_IdentityReplyParser.TryParse(OxygenReply, out var id));
+        Assert.True(id.Manufacturer.IsExtended);
+        Assert.Equal(0x0105, id.Manufacturer.Value);
+        Assert.Equal(0x00 | (0x02 << 7), id.Family);
+        Assert.Equal(0x30 | (0x30 << 7), id.Member);
+        Assert.Equal((uint)(0x35 | (0x30 << 7)), id.SoftwareRevision);
+    }
+
+    [Fact]
+    public void Rejects_reply_with_no_revision_or_too_many_revision_bytes()
+    {
+        // 1-byte id, family, member, F7 — zero revision bytes
+        Assert.False(Midi_IdentityReplyParser.TryParse([0xF0, 0x7E, 0x7F, 0x06, 0x02, 0x41, 0x01, 0x00, 0x02, 0x00, 0xF7], out _));
+        // 1-byte id with 5 revision bytes
+        Assert.False(Midi_IdentityReplyParser.TryParse([0xF0, 0x7E, 0x7F, 0x06, 0x02, 0x41, 0x01, 0x00, 0x02, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0xF7], out _));
     }
 
     [Fact]

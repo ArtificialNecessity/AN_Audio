@@ -272,6 +272,14 @@ All done 2026-09-07:
 - Device sends real `0x80` NoteOff (not velocity-0 NoteOn), so D15 folding was not exercised by this hardware.
 - **Finding → D11 amended:** the driver reports the SAME `NameGuid` for all four ports. A GUID alone is not a unique key.
 
+### Hardware validation log 2 (2026-09-08, M-Audio Oxygen 49 MKV + MPK mini IV, Windows MIDI Services now active)
+
+- **Windows MIDI Services activated between runs** (`midisrv` endpoints present). The MPK's ports were renamed by the OS (`MPK mini IV MIDI Port` / `DAW Port` / `Plugin Port` / `Software Contro`, plus a new `Din Port`) and it now reports a `ProductGuid` instead of a shared `NameGuid`, so its `MidiInput_DeviceKey` changed from `nameguid:…` to `productguid:…`. No code change was needed, but **any key persisted before the switch is stale** — exactly the D19 scenario. Consumers should fall back to `TypeId` (+ name) when a persisted `Key` is not found.
+- Oxygen 49 initially did not enumerate at all (absent from Windows PnP, not just from WinMM). Root cause: a passive USB-A extension cable — bus-powered controller could not complete USB enumeration. Not a library issue; recorded because "controller is dead" will recur and the first check is *does Windows PnP list it*.
+- Hot-plug: `DeviceListChanged Added ×3` and `DeviceOpened ×3` within one poll interval while running. ✔
+- `DriverTimestamp` is **per port** (ms since that port's `midiInStart`); `ArrivalTicks` is global. The Oxygen showed `drv=118 ms` at `arrival=101184 ms` because it was opened 100 s after the MPK. Correlate across ports with `ArrivalTicks` only.
+- **Finding → parser fixed:** the Oxygen answers the Identity Request with `F0 7E 7F 06 02 00 01 05 00 02 30 30 35 30 F7` — a 3-byte manufacturer id (`00 01 05`) but only **two** software-revision bytes (the spec says four). The original parser required 17 bytes and rejected it, leaving `TypeId.IsUnknownType = true`. `Midi_IdentityReplyParser` now requires manufacturer + family + member and accepts **1–4 revision bytes** (whatever precedes `F7`); the captured reply is a test fixture. Lesson: treat the Identity Reply's revision field as variable length in every backend.
+
 Resolved 2026-09-07 (moved into Decisions): packaging → D21; `MIM_MOREDATA` → D22; SysEx max size → D20; restart + in-callback guard → D14; ordinal-key limitation and device-type identity → D11.
 
 ## 9. Alternatives considered
