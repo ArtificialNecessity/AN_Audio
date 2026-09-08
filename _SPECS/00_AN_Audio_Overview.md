@@ -1,7 +1,7 @@
 # 00 — AN.Audio: what this library is
 
 - **Status:** Living document (update when scope changes)
-- **Package:** `ArtificialNecessity.Audio` (one nupkg; assemblies `AN.Audio.dll`, `AN.Audio.Midi.dll`, future `AN.Audio.Capture.dll` only if it cannot live in `AN.Audio.dll`)
+- **Packages:** one per feature area — `ArtificialNecessity.Audio` (`AN.Audio.dll`), `ArtificialNecessity.Audio.Midi` (`AN.Audio.Midi.dll`), future `ArtificialNecessity.Audio.Capture`
 - **Repo:** https://github.com/ArtificialNecessity/AN_Audio — Apache 2.0
 
 ## Goal
@@ -47,7 +47,6 @@ AN_Audio/
 │   ├── Internal/                format conversion, sinc resampler, shared allocation-free helpers
 │   └── Platforms/{Windows,MacOS,Linux,Android,iOS}/
 ├── src/AN.Audio.Midi/           MIDI in/out — SAME layout: Internal/, Platforms/…
-├── src/AN.Audio.Package/        the ONLY packable project — assembles ArtificialNecessity.Audio (AN.Audio.dll + AN.Audio.Midi.dll)
 ├── tests/AN.Audio.Tests/        xunit, hardware-free
 ├── tests/AN.Audio.Midi.Tests/   xunit, hardware-free (interop layout, ring, parsers)
 ├── tests/SimpleAudioTest/       console smoke with real devices (manual)
@@ -56,9 +55,9 @@ AN_Audio/
 └── AN.Audio.Build.props         timestamp versioning, analyzers, artifacts/ output paths — imported by every csproj
 ```
 
-**Packaging rule:** feature-area projects (`AN.Audio`, `AN.Audio.Midi`, future `AN.Audio.Capture`) are `IsPackable=false`; only
-`AN.Audio.Package` packs. Reference direction is `AN.Audio.Midi → AN.Audio` (never reverse); the package project references both
-with `PrivateAssets=all` and copies their outputs into `lib/<tfm>/` (spec 30 D21).
+**Packaging rule (spec 30 D27):** one NuGet package per feature-area project, each independent — `ArtificialNecessity.Audio`
+(`src/AN.Audio`), `ArtificialNecessity.Audio.Midi` (`src/AN.Audio.Midi`), future `ArtificialNecessity.Audio.Capture`. No umbrella
+project, no inter-project references. `cmd/publish-local.cs` packs the solution with one shared timestamp version.
 
 Every feature-area project mirrors this: public interfaces + factory at the root, `Internal/` for platform-neutral machinery,
 `Platforms/<OS>/` for one backend each (`<Api>Interop.cs` + `<Api><Area>.cs` + `<Api>DeviceManager.cs`).

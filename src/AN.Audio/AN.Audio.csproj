@@ -8,15 +8,25 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>AN.Audio</RootNamespace>
-    <!-- Packed into ArtificialNecessity.Audio by src/AN.Audio.Package (SPEC-30 D21). -->
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <PackageId>ArtificialNecessity.Audio</PackageId>
     <Description>Cross-platform audio playback via direct PInvoke to OS audio APIs (WASAPI, ALSA, CoreAudio). Zero native dependencies.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+    <PackageProjectUrl>https://github.com/ArtificialNecessity/AN_Audio</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ArtificialNecessity/AN_Audio</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <Authors>David Jeske</Authors>
     <Copyright>(C)opyright David Jeske 2026</Copyright>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="AN.Audio.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../../README.md" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)../../LICENSE.txt" Pack="true" PackagePath="/" />
   </ItemGroup>
 
 </Project>

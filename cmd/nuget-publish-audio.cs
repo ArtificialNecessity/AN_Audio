@@ -1,9 +1,9 @@
 #!/usr/bin/env -S dotnet run
-// nuget-publish-audio.cs — Cross-platform Release pack + push of ArtificialNecessity.Audio to NuGet.org.
+// nuget-publish-audio.cs — Cross-platform Release pack + push of the AN.Audio packages to NuGet.org.
 //
 // Versioning is timestamp-based (v2) via AN.Audio.Build.props; the stamp is captured once here so
-// AN.Audio.dll, AN.Audio.Midi.dll and the nupkg share one version. Only src/AN.Audio.Package is packed
-// (SPEC-30 D21) — it bundles both DLLs.
+// every DLL and nupkg shares one version. Two independent packages, one per project:
+// ArtificialNecessity.Audio (src/AN.Audio) and ArtificialNecessity.Audio.Midi (src/AN.Audio.Midi).
 //
 // Usage:
 //   dotnet run --file cmd/nuget-publish-audio.cs              # pack + push
@@ -34,49 +34,54 @@ string repoRoot = FindRepoRoot(Directory.GetCurrentDirectory())
     ?? FindRepoRoot(AppContext.BaseDirectory)
     ?? Fail("Cannot find repo root (looked for AN.Audio.Build.props walking up from cwd)");
 
-string packageProject   = Path.Combine(repoRoot, "src", "AN.Audio.Package", "AN.Audio.Package.csproj");
+string solutionPath     = Path.Combine(repoRoot, "AN.Audio.slnx");
 string releaseOutputDir = Path.Combine(repoRoot, "artifacts", "Packages", "Release");
 string? localFeed       = Environment.GetEnvironmentVariable("LOCAL_NUGET_REPO");
 string? apiKey          = Environment.GetEnvironmentVariable("NUGET_API_KEY");
 const string NuGetSource = "https://api.nuget.org/v3/index.json";
+string[] packageIds     = ["ArtificialNecessity.Audio", "ArtificialNecessity.Audio.Midi"];
 
 var stamp = BuildStamp.Now();
-string expectedPackage = Path.Combine(releaseOutputDir, $"ArtificialNecessity.Audio.{stamp.PackageVersion}.nupkg");
+string[] expectedPackages = packageIds.Select(id => Path.Combine(releaseOutputDir, $"{id}.{stamp.PackageVersion}.nupkg")).ToArray();
 
-WriteColored("\n=== Packing ArtificialNecessity.Audio (Release) ===", ConsoleColor.Cyan);
+WriteColored("\n=== Packing AN.Audio packages (Release) ===", ConsoleColor.Cyan);
 WriteColored($"Version: {stamp.AssemblyVersion} (pkg: {stamp.PackageVersion})", ConsoleColor.DarkGray);
 
-if (Run("dotnet", $"pack \"{packageProject}\" -c Release /nodeReuse:false {stamp.MsBuildArgs}") is int packExit and not 0)
+if (Run("dotnet", $"pack \"{solutionPath}\" -c Release /nodeReuse:false {stamp.MsBuildArgs}") is int packExit and not 0)
     return Failed($"dotnet pack exited with code {packExit}");
 
-if (!File.Exists(expectedPackage))
-    return Failed($"Expected package not found: {expectedPackage}");
-
-WriteColored($"\nPackage: {Path.GetFileName(expectedPackage)}  ({Math.Round(new FileInfo(expectedPackage).Length / 1024.0, 1)} KB)", ConsoleColor.Green);
+foreach (string pkg in expectedPackages)
+{
+    if (!File.Exists(pkg)) return Failed($"Expected package not found: {pkg}");
+    WriteColored($"Package: {Path.GetFileName(pkg)}  ({Math.Round(new FileInfo(pkg).Length / 1024.0, 1)} KB)", ConsoleColor.Green);
+}
 
 if (dryRun)
 {
-    WriteColored($"\n[DRY RUN] Would push: {expectedPackage}", ConsoleColor.Yellow);
+    foreach (string pkg in expectedPackages) WriteColored($"\n[DRY RUN] Would push: {pkg}", ConsoleColor.Yellow);
     WriteColored($"[DRY RUN] To: {NuGetSource}", ConsoleColor.Yellow);
     return 0;
 }
 
 WriteColored("\n=== Pushing to NuGet.org ===", ConsoleColor.Cyan);
 string keyArg = string.IsNullOrWhiteSpace(apiKey) ? "" : $" --api-key {apiKey}";
-if (Run("dotnet", $"nuget push \"{expectedPackage}\" --source {NuGetSource} --skip-duplicate{keyArg}") is int pushExit and not 0)
-    return Failed($"dotnet nuget push exited with code {pushExit}");
+foreach (string pkg in expectedPackages)
+{
+    if (Run("dotnet", $"nuget push \"{pkg}\" --source {NuGetSource} --skip-duplicate{keyArg}") is int pushExit and not 0)
+        return Failed($"dotnet nuget push ({Path.GetFileName(pkg)}) exited with code {pushExit}");
+}
 
 if (!string.IsNullOrWhiteSpace(localFeed))
 {
     string feed = Path.GetFullPath(localFeed);
     Directory.CreateDirectory(feed);
-    File.Copy(expectedPackage, Path.Combine(feed, Path.GetFileName(expectedPackage)), overwrite: true);
+    foreach (string pkg in expectedPackages) File.Copy(pkg, Path.Combine(feed, Path.GetFileName(pkg)), overwrite: true);
     WriteColored($"Also deployed to local feed: {feed}", ConsoleColor.DarkGray);
 }
 
 WriteColored("\n=== Done ===", ConsoleColor.Green);
-WriteColored($"Published: {Path.GetFileName(expectedPackage)}", ConsoleColor.Green);
-WriteColored("View at:   https://www.nuget.org/packages/ArtificialNecessity.Audio/", ConsoleColor.Green);
+foreach (string id in packageIds)
+    WriteColored($"Published: {id} {stamp.PackageVersion}  https://www.nuget.org/packages/{id}/", ConsoleColor.Green);
 return 0;
 
 // ══ helpers ══════════════════════════════════════════════════════════════════════════════

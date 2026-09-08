@@ -73,7 +73,7 @@ The callback is the only extension point. It runs on a high-priority audio threa
 
 ## MIDI Input
 
-`AN.Audio.Midi.dll` ships in the same package. Default policy: open every input port, merge them into one stream, hot-plug arrivals join automatically — plug in a controller, press a key, get a message.
+MIDI input is its own package, `ArtificialNecessity.Audio.Midi` (`AN.Audio.Midi.dll`), independent of `ArtificialNecessity.Audio` — reference either or both. Default policy: open every input port, merge them into one stream, hot-plug arrivals join automatically — plug in a controller, press a key, get a message.
 
 ```csharp
 using AN.Audio.Midi;
@@ -153,7 +153,6 @@ AN.Audio/
 │   ├── Midi_RelativeDecode.cs       # stateless encoder-delta decoders (app decides which applies)
 │   ├── MidiInput_MessageRing.cs     # growable SPSC queue (driver thread → your audio thread)
 │   └── Platforms/Windows/           # WinMM midiIn*/midiOut* interop, port, input, device manager
-├── src/AN.Audio.Package/            # The ONLY packable project: builds the ArtificialNecessity.Audio nupkg (both DLLs)
 ├── tests/SimpleAudioTest/           # Standalone console test (plays a WAV file)
 ├── tests/SimpleMidiTest/            # Interactive console: list ports, print messages, hot-plug, identity (cmd/test-midi.cmd)
 ├── tests/AN.Audio.Tests/             # Automated tests, including sinc resampling

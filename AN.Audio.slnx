@@ -2,7 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/AN.Audio/AN.Audio.csproj" />
     <Project Path="src/AN.Audio.Midi/AN.Audio.Midi.csproj" />
-    <Project Path="src/AN.Audio.Package/AN.Audio.Package.csproj" />
+
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SimpleAudioTest/SimpleAudioTest.csproj" />

@@ -455,8 +455,7 @@ src/AN.Audio/
 │       ├── CoreAudioOutput.cs, CoreAudioDeviceManager.cs
 │       └── AudioToolboxInterop.cs, CoreAudioInterop.cs
 
-src/AN.Audio.Midi/               // MIDI input, spec 30 — same layout
-src/AN.Audio.Package/            // the only packable project; produces the ArtificialNecessity.Audio nupkg with both DLLs
+src/AN.Audio.Midi/               // MIDI input, spec 30 — same layout; independent package ArtificialNecessity.Audio.Midi
 ```
 
 Platform selection is **runtime** (`RuntimeInformation.IsOSPlatform` in the factories), not conditional compilation — one AnyCPU assembly per feature area. All backends compile on every OS; only the matching one is instantiated.
