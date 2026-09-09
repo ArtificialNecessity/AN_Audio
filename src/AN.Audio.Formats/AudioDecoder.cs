@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using AN.Audio.Formats.Internal;
 using AN.Audio.Formats.Flac;
+using AN.Audio.Formats.Mp3;
 using AN.Audio.Formats.Wav;
 
 namespace AN.Audio.Formats;
@@ -36,7 +37,7 @@ public static class AudioDecoder
             {
                 AudioDecoder_Container.Wav => new Wav_Decoder(peek),
                 AudioDecoder_Container.Flac => new Flac_Decoder(peek),
-                AudioDecoder_Container.Mp3 => throw new AudioDecoder_UnsupportedException("MP3 decoding arrives in spec 50 Phase 3", AudioDecoder_Container.Mp3),
+                AudioDecoder_Container.Mp3 => new Mp3_Decoder(peek),
                 AudioDecoder_Container.Aiff => throw new AudioDecoder_UnsupportedException("AIFF is not yet supported (Phase 4)", AudioDecoder_Container.Aiff),
                 AudioDecoder_Container.Ogg => throw new AudioDecoder_UnsupportedException("Ogg is not yet supported (Phase 4)", AudioDecoder_Container.Ogg),
                 _ => throw new AudioDecoder_UnsupportedException("unrecognised audio container"),

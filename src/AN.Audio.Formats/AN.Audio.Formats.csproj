@@ -26,6 +26,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../AN.Audio.Common/AN.Audio.Common.csproj" />
+    <!-- Spec 50 D7: the package's ONLY external dependency. 3.0.0 audited 2026-09-09 (100 % managed, no unsafe, no P/Invoke, zero deps). -->
+    <PackageReference Include="NLayer" Version="3.0.0" />
   </ItemGroup>
 
   <ItemGroup>

@@ -20,8 +20,10 @@
 | A9 | `Wav/Wav_ChunkIndex.cs` | `Wav/Wav_ChunkId.cs` (`Wav_ChunkId` + `Wav_ChunkInfo`) and `Wav/Wav_Metadata.cs` (`Wav_SamplerChunk`, `Wav_SampleLoop`, `Wav_CuePoint`, `Wav_InstrumentChunk`, `Wav_InfoTags`) | Naming follows the types inside. |
 | A10 | "MD5 verifies" on Salamander | Salamander files carry an all-zero MD5 (= "not computed" per the FLAC spec); verification is skipped when the signature is zero, `Flac_Decoder.HasMd5` says so | Real-file finding. |
 | A11 | (not planned) | Reference decoder's `BitReader` reads through a 64 KiB byte buffer, tracks absolute position, is re-seatable after a seek, and verifies the frame-header CRC-8; `Internal/MpegFrameHeader.cs` validates MPEG headers for sniffing | Needed for seeking and D8. |
+| A12 | D13 for MP3 "bounded, not zero" (agreed at the start of Phase 3 while `MpegFile` was the plan) | **Zero** after all: with our own framing nothing allocates per frame; the MP3 test asserts 0 bytes like WAV/FLAC | A13 made the concession unnecessary. |
+| A13 | `Mp3_Decoder` wraps `NLayer.MpegFile` | `Mp3_Decoder` owns the framing (`Mp3_FrameReader`, our `IMpegFrame`, frame-offset index, gapless trim with the +529 rule, pre-roll seek) and uses only `NLayer.MpegFrameDecoder` | Built against `MpegFile` first; its `Position` setter re-primes with one frame and then silently swallows reservoir-starved frames without advancing `Position` (seeks landed a frame late, unobservably), it trims gapless only for `LAME…` encoder strings (ffmpeg's `Lavc…` files were not trimmed), and its position numbering flips from trimmed to raw after a seek. Design spec §MP3 carries the same notes. |
 
-Bugs found by the tests while building: seekable `data` overrun did not set `EndedEarly` (fixed); FLAC seek past the last frame left stale frame data deliverable (fixed); CRC-8 accumulator mishandled reads starting mid-byte (fixed).
+Bugs found by the tests while building: seekable `data` overrun did not set `EndedEarly` (fixed); FLAC seek past the last frame left stale frame data deliverable (fixed); CRC-8 accumulator mishandled reads starting mid-byte (fixed); MP3 seek off by one frame (root cause in NLayer's `MpegFile`, see A13); ffmpeg 7.1.1 ignores `-write_id3v1 1` when `-id3v2_version 0` is given (the ID3v1 test synthesises its own tag).
 
 ## Handoff — what the implementing session must know
 
@@ -103,16 +105,23 @@ Bugs found by the tests while building: seekable `data` overrun did not set `End
 ## Phase 3 — MP3
 
 - [x] Q2 answered 2026-09-09 from source (`C:\PROJECTS\3P_NLayer` @ `046c7ce`): `netstandard2.0;net8.0`, zero deps, no unsafe/P-Invoke. Remaining: add `<PackageReference Include="NLayer" Version="3.0.0" />` to Formats only
-- [ ] `Mp3/Mp3_Id3v2.cs` (syncsafe size, TIT2/TPE1/TALB/TRCK/TDRC/TYER, APIC skipped) → `Mp3_Id3Tags`; parsed from the `PeekableStream` before NLayer sees the stream
-- [ ] `Mp3/Mp3_Decoder.cs : IAudioDecoder` wrapping `NLayer.MpegFile(Stream)` — `NativeFormat = Float32`, `SourceBitDepth = 0`, `TotalFrames` from `Length` when ≥ 0 else null, `GaplessInfo`; NLayer types in NO public signature
-- [ ] Sniff: ID3v2-prefixed and bare MPEG sync (two consecutive valid frame headers); hint tiebreak
-- [ ] Fixture: `ffmpeg -i in.wav -c:a libmp3lame -b:a 128k out.mp3`; tests: frame count ± 1 granule, rate/channels, tag title, forward-only stream, `TotalFrames == null` path, allocation
+- [x] Generic tier: `AudioDecoder_PictureType` (0–20, shared ID3/FLAC numbering), `AudioDecoder_PictureInfo`, `AudioDecoder_PictureCallback(in info, ReadOnlySpan<byte>)` in `AudioDecoder_Picture.cs`
+- [x] `Internal/MpegFrameHeader`: `TryParse` → `MpegFrameHeader_Info` (version/layer/channel mode/bit rate/frame length/samples-per-frame/side-info size; enums prefixed `MpegFrameHeader_*` because NLayer's public `MpegVersion`/`MpegLayer`/`MpegChannelMode` collide); `Internal/MpegXingHeader`: Xing/Info (frames, bytes, TOC skipped, quality) + LAME (encoder string, delay/padding; accepted for `LAME`/`Lavc`/`Lavf` writers) + VBRI
+- [x] `Mp3/Mp3_Id3v2.cs` (v2.2/2.3/2.4; syncsafe size; whole-tag and per-frame unsync; extended header; footer; text frames incl. TXXX; COMM; APIC/PIC → callback or skip; compressed/encrypted frames skipped; ID3v1 + v1.1 track) → `Mp3_Id3Tags` (+ `PictureCount`, `Source`, `TagLength`); parsed from the `PeekableStream` look-ahead WITHOUT consuming
+- [x] `Mp3/Mp3_FrameReader.cs` (A13): `Mp3_Frame : IMpegFrame` (reused; bit reader over the frame bytes) + sequential reader (ID3 tags anywhere skipped, ID3v1 tail recognised, resync with second-header confirmation, header-only mode for indexing, `EndedShort`)
+- [x] `Mp3/Mp3_Decoder.cs : IAudioDecoder` on `NLayer.MpegFrameDecoder` — `NativeFormat = Float32`, `SourceBitDepth = 0`, `TotalFrames` = Xing/VBRI frames × spf − trim, else a header-only scan at open when seekable, else null; gapless trim (delay + 529 / padding − 529); `Mp3_StreamInfo`, `Mp3_GaplessInfo`, `CorruptFrames`, `Mp3_DecoderOptions { OnPicture, ReadId3v1 }`; exact `SeekToFrame` via frame index + pre-roll; `EndedEarly` on truncation or fewer frames than declared; free-format → `Unsupported`; property change mid-stream → `Unsupported`; NLayer types in NO public signature
+- [x] Sniff: ID3v2-prefixed and bare MPEG sync (two consecutive valid frame headers); hint tiebreak (built in Phase 1, exercised now by `AudioDecoder.Open` → `Mp3_Decoder`)
+- [x] Fixtures (`Fixtures/README.md`): CBR 128k + ID3v2.3 + Info/LAME, VBR + ID3v2.4 + Xing, CBR 64k with no Xing and no tags; tag shapes synthesised by `Support/Mp3_TestTagWriter` (v2.2/2.3/2.4 × unsync/footer/extended header, APIC + PIC). Tests (24): exact frame count == WAV master (280576), time alignment (best lag 0, correlation > 0.9) seekable + forward-only, native == float, `DecodeAll` parity, VBR, `TotalFrames == null` forward-only without Xing (and the seekable header scan), ID3v1, ID3v2 tags incl. TSSE, picture callback bytes + `PictureCount` without callback, garbage rejected, truncation → `EndedEarly`, D13 zero allocation, seek == linear at 8 targets incl. 0/end, read-through after seek reaches the same end, forward-only seek throws
 - [ ] publish-local; tick Phase 3; commit
+
+## Phase 4 — items picked for the 2026-09-09 session (after Phase 3)
+
+- [ ] 4a: A-law / µ-law in `Wav_Decoder` (`Wav_FormatTag.Alaw/Mulaw`, EXTENSIBLE sub-formats too): expand via G.711 tables to `NativeFormat = Int16`, `Info.Encoding = Alaw/Mulaw`, `SourceBitDepth = 8`; `Wav_TestWriter` gains both; bit-exact tests against the reference expansion formula
+- [ ] 4c: RF64 (`ds64` chunk: RIFF size, `data` size, sample count, table) and W64 (Sony Wave64, 16-byte GUID chunk ids, 8-byte sizes) in `Wav_Decoder`; `Sniff` recognises `riff\x2E\x91\xCF\x11…` W64 GUID; synthesised tests (small files with RF64/W64 headers; `data` > 4 GiB declared but clamped to the stream → `EndedEarly` path)
 
 ## Phase 4 — later (own addendum each; not scheduled)
 
 - [ ] AIFF/AIFC (`FORM`, big-endian PCM, `MARK`/`INST` loops)
-- [ ] RF64/W64, A-law/µ-law
 - [ ] Ogg container: Vorbis (NVorbis), Opus (Concentus — direct `OpusDecoder`, `AttemptToUseNativeLibrary=false`, test asserts no `Native*` type; cleanup: unsafe-free vendor/build per design spec audit), FLAC-in-Ogg
 - [ ] Encoders (WAV/FLAC writers) if a consumer needs export
 

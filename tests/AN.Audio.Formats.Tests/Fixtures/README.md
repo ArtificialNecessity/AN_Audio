@@ -16,6 +16,15 @@ ffmpeg -y -i AssetSource/cartesia_tts_test.wav -c:a pcm_s24le tests/AN.Audio.For
 
 # 16-bit WAV master = the source, copied
 copy AssetSource\cartesia_tts_test.wav tests\AN.Audio.Formats.Tests\Fixtures\cartesia_tts_test.wav
+
+# MP3 (Phase 3, ffmpeg 7.1.1 / libmp3lame, 2026-09-09)
+# CBR 128k + ID3v2.3 + Info (Xing) block with LAME gapless data
+ffmpeg -y -i AssetSource/cartesia_tts_test.wav -c:a libmp3lame -b:a 128k -metadata title="Cartesia TTS test" -metadata artist="AN.Audio" -id3v2_version 3 -write_xing 1 tests/AN.Audio.Formats.Tests/Fixtures/cartesia_tts_test.mp3
+# VBR (-q:a 4) + ID3v2.4 + Xing block
+ffmpeg -y -i AssetSource/cartesia_tts_test.wav -c:a libmp3lame -q:a 4 -metadata title="Cartesia TTS test VBR" -id3v2_version 4 tests/AN.Audio.Formats.Tests/Fixtures/cartesia_tts_test_vbr.mp3
+# CBR 64k, NO Xing/Info block, NO tags at all (TotalFrames == null on a forward-only stream); the ID3v1 test appends its own 128-byte tag
+ffmpeg -y -i AssetSource/cartesia_tts_test.wav -c:a libmp3lame -b:a 64k -write_xing 0 -id3v2_version 0 tests/AN.Audio.Formats.Tests/Fixtures/cartesia_tts_test_noxing.mp3
+# ID3v2 tag shapes (v2.2/2.3/2.4, unsync, footer, extended header, APIC) are synthesised in memory by Support/Mp3_TestTagWriter.cs
 ```
 
 Files that are NOT here (licence): `clap-808.wav` (99Sounds) and the Salamander Grand Piano FLACs are exercised by

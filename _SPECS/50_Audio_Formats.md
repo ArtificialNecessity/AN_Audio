@@ -1,6 +1,6 @@
 # 50 — AN.Audio.Formats: managed audio FORMAT decoding (WAV, FLAC, MP3, …)
 
-- **Status:** v2 (2026-09-08) — D1–D16 agreed; **Phase 1 built** (Common + Formats skeleton + WAV, published as 0.260908.234621; MusicStudio adapter 1d done 2026-09-09); **Phase 2 built** (FLAC incl. seeking, published as 0.260908.235755); Phase 3 (MP3) not started
+- **Status:** v3 (2026-09-09) — D1–D16 agreed; **Phase 1 built** (Common + Formats skeleton + WAV, published as 0.260908.234621; MusicStudio adapter 1d done 2026-09-09); **Phase 2 built** (FLAC incl. seeking, published as 0.260908.235755); **Phase 3 built** (MP3 on NLayer's frame decoder with our framing, picture callback); Phase 4a/4c (A-law/µ-law, RF64/W64) in progress
 - **Package:** `ArtificialNecessity.Audio.Formats` (`AN.Audio.Formats.dll`), `src/AN.Audio.Formats/`, namespace `AN.Audio.Formats`
 - **Depends only on** `ArtificialNecessity.Audio.Common` (D15: the shared PCM vocabulary) and, from Phase 3, `NLayer`. Never on
   `ArtificialNecessity.Audio` itself. Pure managed, `AnyCPU`, NativeAOT-safe.
@@ -252,11 +252,40 @@ Correct per the RIFF/WAVE spec (MS RIFF 1991, `mmreg.h`, EBU RF64), tolerant whe
 
 ### `Mp3/` — `Mp3_Decoder : IAudioDecoder`
 
-- Wraps `NLayer.MpegFile(Stream)`; `StereoMode.Both`; `ReadSamples(float[], …)` → our span API. Info: `Encoding = MpegLayer{1,2,3}`,
-  `SourceBitDepth = 0`, `TotalFrames` from `MpegFile.Length` when ≥ 0 (Xing/LAME/VBRI header or seekable full scan), else `null` (D10).
-  Gapless trimming (encoder delay/padding from the LAME tag) is NLayer's; we expose `Mp3_Decoder.GaplessInfo { EncoderDelay, EncoderPadding }`.
-- `Mp3_Id3Tags`: ID3v2 header is skipped by NLayer's stream reader; we parse the tag ourselves in `Mp3/Mp3_Id3v2.cs` (TIT2, TPE1, TALB, TRCK,
-  TDRC/TYER; APIC skipped) since it precedes the audio on any stream. ID3v1 (last 128 bytes) only when the stream seeks.
+- **NLayer is the frame decoder only; the framing is ours** (decided 2026-09-09 after building against `MpegFile` first — IMPL A13).
+  `Mp3/Mp3_FrameReader.cs` walks the stream frame by frame through `PeekableStream` (sync scan with second-header confirmation on resync,
+  ID3v2 tags anywhere skipped by their syncsafe length, truncated last frame → `EndedEarly`) and presents each frame to
+  `NLayer.MpegFrameDecoder.DecodeFrame(IMpegFrame, Span<float>)` through our own `IMpegFrame` implementation (a bit reader over the frame
+  bytes). `NativeFormat = Float32` so `ReadFramesNative` is the same call with `MemoryMarshal`. Info: `Encoding = MpegLayer{1,2,3}` from the
+  first header (`Internal/MpegFrameHeader`), `SourceBitDepth = 0`. `TotalFrames`: Xing/Info/VBRI frame count × samples-per-frame minus the
+  gapless trim; without such a block, a header-only scan of the whole file at open when the stream seeks (also builds the seek index);
+  else `null` (D10). Why not `MpegFile`: (a) its `Position` setter re-primes with ONE frame and then silently swallows reservoir-starved
+  frames without advancing `Position` — seeks land a frame late, unobservably; (b) it applies gapless trimming only for encoder strings
+  starting with `LAME`, so ffmpeg (`Lavc…`) files are not trimmed; (c) after a non-zero seek its positions switch from trimmed to raw.
+  `Internal/MpegXingHeader` parses the first frame's Xing/Info/LAME (and VBRI) block; exposed as `Mp3_Decoder.StreamInfo` and `Gapless`.
+- **Gapless (LAME rule as ffmpeg applies it):** skip `EncoderDelay + 529` samples at the start (529 = the MDCT/filterbank decoder delay)
+  and `EncoderPadding − 529` at the end, so `TotalFrames = frames × spf − delay − padding` and the output is time-aligned with the source.
+  A frame that decodes to 0 samples after the seek pre-roll (reservoir starved = corrupt) is emitted as silence so the timeline stays exact;
+  `Mp3_Decoder.CorruptFrames` counts them.
+- `Mp3_Id3Tags`: ID3v2 (2.2/2.3/2.4; unsynchronisation, extended header, footer) is parsed by `Mp3/Mp3_Id3v2.cs` from the `PeekableStream`
+  look-ahead WITHOUT consuming it, so NLayer still sees the stream from byte 0 (its reader addresses the stream by absolute offset and
+  skips the tag itself). Text frames → `Title, Artist, Album, AlbumArtist, Track, Year, Genre, Comment` plus a case-sensitive multimap of
+  every text frame by its 4-char id (`TXXX` keyed as `TXXX:<description>`). ID3v1 (last 128 bytes) only when the stream seeks and no v2 tag exists.
+- **Pictures travel by callback, never by retention (amends Q3).** `APIC` bodies can be megabytes; whether to keep them is the client's
+  memory decision. `Mp3_DecoderOptions.OnPicture : AudioDecoder_PictureCallback?` —
+  `delegate void AudioDecoder_PictureCallback(in AudioDecoder_PictureInfo info, ReadOnlySpan<byte> imageBytes)` — is invoked once per
+  picture during construction (the tag precedes the audio) with a span over a pooled buffer that is valid ONLY for the call; the client copies
+  what it wants. Without a callback the body is skipped, never buffered. `Mp3_Id3Tags.PictureCount` is always populated so a client can learn
+  art exists and re-open with a callback. `AudioDecoder_PictureType` (0–20, the numbering ID3 APIC and FLAC PICTURE share) and
+  `AudioDecoder_PictureInfo(Type, MimeType, Description, ByteLength)` live in the generic tier so FLAC `PICTURE` can reuse them later.
+  The generic `AudioDecoder.Open` never delivers pictures (per-format tier only).
+- Seek (D11): a frame-offset index (`List<long>`, built lazily by header-only scanning; ~1 MB per hour of audio) maps the target sample to
+  its MPEG frame; the decoder is `Reset()` and re-primed by decoding a pre-roll of ≥ 4 frames (≥ 512 bytes: the bit reservoir's reach) whose
+  output is discarded, then the target frame is decoded and consumed up to the exact sample. Bit-identical to a linear decode. `CanSeek` mirrors the stream.
+- Errors (D12): NLayer's `InvalidDataException("Not a valid MPEG file!")` at open → `AudioDecoder_FormatException`; mid-stream bad frames
+  are resynced by NLayer (not an error); a stream ending before the Xing-declared sample count → `EndedEarly`. Free-format bitrate on a
+  forward-only stream (NLayer throws `InvalidOperationException`) → `AudioDecoder_UnsupportedException`.
+- D13: with our own framing the steady-state read path allocates nothing (frame buffer, float buffer and index list are reused/grown only); the zero-allocation test applies to MP3 too.
 - Non-seekable streams: NLayer 2.0.1 has a known bug (fixed in 3.0.0's notes) where a non-seekable stream throws on the first read.
   Phase 3 picks **NLayer 3.0.0** (`NLayer` package itself is still `netstandard2.0`+`net8.0`, no deps; only `NLayer.NAudioSupport` moved to net9) and
   adds a forward-only-stream test to prove it.
@@ -345,8 +374,9 @@ Built 2026-09-08, commit `f31655c`. Published `0.260908.235755`. 110 Formats tes
 - [x] MusicStudio: file pickers offer `wav` + `flac`; `A0v3.flac` verified (2026-09-09)
 
 ### Phase 3 — MP3
-- [ ] `PackageReference NLayer 3.0.0`; `Mp3_Decoder` wrapper; `Mp3_Id3v2` parser; `GaplessInfo`
-- [ ] Tests incl. forward-only stream (the 2.0.1 regression) and `TotalFrames == null` path
+Built 2026-09-09. 134 Formats tests green (24 MP3). NLayer is used as the frame decoder only (IMPL A13).
+- [x] `PackageReference NLayer 3.0.0`; `Mp3_Decoder` on `MpegFrameDecoder` with our `Mp3_FrameReader`; `Mp3_Id3v2` parser (+ picture callback); `Gapless`/`StreamInfo`
+- [x] Tests incl. forward-only stream (the 2.0.1 regression is moot: NLayer never sees the stream) and `TotalFrames == null` path; seek == linear bit-exact; decoded length == source length; D13 zero allocation
 - [ ] MusicStudio filter adds `*.mp3`
 
 ### Phase 4 — later formats (each its own short addendum when started)
