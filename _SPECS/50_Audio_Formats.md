@@ -1,6 +1,6 @@
 # 50 — AN.Audio.Formats: managed audio FORMAT decoding (WAV, FLAC, MP3, …)
 
-- **Status:** v2 (2026-09-08) — D1–D16 agreed; **Phase 1 built** (Common + Formats skeleton + WAV, published as 0.260908.234621; MusicStudio adapter 1d pending in that repo); Phase 2 in progress
+- **Status:** v2 (2026-09-08) — D1–D16 agreed; **Phase 1 built** (Common + Formats skeleton + WAV, published as 0.260908.234621; MusicStudio adapter 1d pending in that repo); **Phase 2 built** (FLAC incl. seeking, published as 0.260908.235755); Phase 3 (MP3) not started
 - **Package:** `ArtificialNecessity.Audio.Formats` (`AN.Audio.Formats.dll`), `src/AN.Audio.Formats/`, namespace `AN.Audio.Formats`
 - **Depends only on** `ArtificialNecessity.Audio.Common` (D15: the shared PCM vocabulary) and, from Phase 3, `NLayer`. Never on
   `ArtificialNecessity.Audio` itself. Pure managed, `AnyCPU`, NativeAOT-safe.
@@ -272,10 +272,10 @@ Fixture provenance: `AssetSource/cartesia_tts_test.wav` (ours) is the WAV master
 
 ### Phase 2 — FLAC
 - [x] Subsume `FlacDecoder.cs` → `Flac/Flac_ReferenceDecoder.cs` + `Flac/LICENSE-SimpleFlac.txt` (2026-09-08, upstream `dc149aa`)
-- [ ] `// AN:` adaptations: namespace `AN.Audio.Formats.Flac`, `internal`, metadata-block loop parses STREAMINFO/VORBIS_COMMENT/SEEKTABLE and skips PICTURE/PADDING/APPLICATION/CUESHEET, `Options` defaults to no byte conversion / no MD5, interleaved `Span<int>`/`Span<float>` frame output (D16), tabs → spaces per repo style
-- [ ] `Flac_Decoder` + `Flac_StreamInfo` + `Flac_Tags` (VORBIS_COMMENT) + `ReadFramesNative` (Int32) / `ReadFrames` (float)
-- [ ] Tests: fixture bit-exactness vs WAV, MD5 verify, forward-only stream, Salamander local test
-- [ ] 2b: `SeekToFrame` via SEEKTABLE / frame-header search
+- [x] `// AN:` adaptations: namespace `AN.Audio.Formats.Flac`, `internal`, metadata-block loop parses STREAMINFO/VORBIS_COMMENT/SEEKTABLE and skips PICTURE/PADDING/APPLICATION/CUESHEET, `Options` defaults to no byte conversion / no MD5, interleaved `Span<int>`/`Span<float>` frame output (D16), tabs → spaces per repo style
+- [x] `Flac_Decoder` + `Flac_StreamInfo` + `Flac_Tags` (VORBIS_COMMENT) + `ReadFramesNative` (Int32) / `ReadFrames` (float)
+- [x] Tests: fixture bit-exactness vs WAV, MD5 verify, forward-only stream, Salamander local test
+- [x] 2b: `SeekToFrame` via SEEKTABLE / frame-header search
 - [ ] MusicStudio: `+ samples…` file filter adds `*.flac`; verify `A0v3.flac` in a Sampler row
 
 ### Phase 3 — MP3

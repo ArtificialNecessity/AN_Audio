@@ -103,9 +103,10 @@ public class SniffTests
         => Assert.Equal(expected, AudioDecoder.HintFromExtension(path));
 
     [Fact]
-    public void Open_Flac_ReportsPhase2Unsupported_ForNow()
+    public void Open_Flac_RoutesToFlacDecoder_And_RejectsBogusStreamInfo()
     {
-        var ex = Assert.Throws<AudioDecoder_UnsupportedException>(() => AudioDecoder.Open(new MemoryStream(Bytes("fLaC\0\0\0\x22" + new string('\0', 40)))));
+        // all-zero STREAMINFO => sample rate 0 => malformed (proves the fLaC route reaches Flac_Decoder)
+        var ex = Assert.Throws<AudioDecoder_FormatException>(() => AudioDecoder.Open(new MemoryStream(Bytes("fLaC\x80\0\0\x22" + new string('\0', 40)))));
         Assert.Equal(AudioDecoder_Container.Flac, ex.Container);
     }
 }

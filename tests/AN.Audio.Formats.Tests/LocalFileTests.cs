@@ -50,4 +50,41 @@ public class LocalFileTests
         var viaPath = AudioDecoder.DecodeAll(Clap808);
         Assert.Equal(142080 / 3, viaPath.FrameCount);
     }
+
+    public static readonly string SalamanderA0v3 = @"C:\PROJECTS\3P_SalamanderGrandPiano\Samples\A0v3.flac";
+
+    [Fact]
+    public void Salamander_A0v3_24bitStereo_DecodesFully_Md5Verifies()
+    {
+        if (!File.Exists(SalamanderA0v3)) return;   // skipped when absent
+
+        using var fs = new FileStream(SalamanderA0v3, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.SequentialScan);
+        using var d = new Flac.Flac_Decoder(fs, new Flac.Flac_DecoderOptions { VerifyMd5 = true });
+        Assert.Equal(24, d.Info.SourceBitDepth);
+        Assert.Equal(2, d.Info.Channels);
+        Assert.Equal(48000, d.Info.SampleRate);
+        Assert.Equal(1079560, d.Info.TotalFrames);   // ffprobe duration_ts
+        // Salamander's encoder wrote an all-zero MD5 (legal: "not computed"); verification is only meaningful when present
+
+        var buf = new float[4096 * 2];
+        long total = 0; int g;
+        while ((g = d.ReadFrames(buf)) > 0) total += g;
+        Assert.Equal(d.Info.TotalFrames, total);
+        Assert.False(d.EndedEarly);
+        Assert.Equal(d.HasMd5, d.Md5Verified);
+
+        // Seek round-trip on a real 24-bit stereo file (no SEEKTABLE expected from most encoders)
+        long target = total / 2;
+        d.SeekToFrame(target);
+        var a = new int[2 * 32];
+        Assert.Equal(32, d.ReadFramesNative(System.Runtime.InteropServices.MemoryMarshal.AsBytes(a.AsSpan())));
+        // compare with a linear decode to the same position
+        using var lin = (Flac.Flac_Decoder)AudioDecoder.Open(SalamanderA0v3);
+        var skip = new int[2 * 4096];
+        long pos = 0;
+        while (pos < target) { int want = (int)Math.Min(4096, target - pos); pos += lin.ReadFramesNative(System.Runtime.InteropServices.MemoryMarshal.AsBytes(skip.AsSpan(0, want * 2))); }
+        var b = new int[2 * 32];
+        Assert.Equal(32, lin.ReadFramesNative(System.Runtime.InteropServices.MemoryMarshal.AsBytes(b.AsSpan())));
+        Assert.Equal(b, a);
+    }
 }

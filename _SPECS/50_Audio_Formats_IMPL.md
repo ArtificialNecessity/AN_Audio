@@ -57,7 +57,7 @@
 - [x] Unsupported (valid) encodings → `AudioDecoder_UnsupportedException` naming the tag (ADPCM, MP3-in-WAV, A-law/µ-law until Phase 4)
 - [x] Tests: `Support/Wav_TestWriter.cs` synthesises every fixture in memory — 8/16/24/32 PCM, float32/64, 1/2/6 ch, EXTENSIBLE with masks + 20-valid-bits-in-24, **odd chunk WITHOUT pad**, RIFF size 0 and 0xFFFFFFFF, `data` overrun, `smpl`+`cue`+`LIST` present, chunks after `data`, `fmt` after `data` (seekable ok / forward-only throws); bit-exact expectations for both `ReadFrames` and `ReadFramesNative`; every case run seekable AND through `ForwardOnlyStream`; `DecodeAll == concat(ReadFrames)`; `leaveOpen`; D13 allocation test (0 bytes across 100 reads after warm-up)
 - [x] Local (uncommitted-file) test, `[Trait("Category","Local")]`, skipped when absent: decode `clap-808.wav`; assert 24-bit mono, frame count = 142080 / 3, chunk index lists `SAUR`, `LIST`, `id3 ` with the last one un-padded
-- [x] `cmd/publish-local` → verify `ArtificialNecessity.Audio.Common`, `.Audio`, `.Audio.Formats` land in `C:\PROJECTS\LocalNuGet` with one shared version; note the version in this file: `0.260908.234621`
+- [x] `cmd/publish-local` → verify `ArtificialNecessity.Audio.Common`, `.Audio`, `.Audio.Formats` land in `C:\PROJECTS\LocalNuGet` with one shared version; note the version in this file: `0.260908.234621` (Phase 1), `0.260908.235755` (Phase 2)
 - [x] Tick Phase 1 in `50_Audio_Formats.md`; commit: `AN.Audio.Formats: WAV decoder (PCM/float/EXTENSIBLE, tolerant chunk walk, smpl/cue/LIST), streaming + zero-copy reads (spec 50 Phase 1c)`
 
 ### Phase 1d — MusicStudio adapter (done in the `C:\PROJECTS\AN_MusicStudio` workspace, NOT here)
@@ -71,15 +71,15 @@
 ## Phase 2 — FLAC
 
 - [x] Subsume SimpleFlac → `Flac/Flac_ReferenceDecoder.cs` + `Flac/LICENSE-SimpleFlac.txt` (2026-09-08)
-- [ ] `git add` both files (first commit of `Flac/`); commit message records upstream URL + commit `dc149aa`
-- [ ] `// AN:` adaptations inside `Flac_ReferenceDecoder.cs`: namespace `AN.Audio.Formats.Flac`, class `internal sealed`, tabs→spaces, `Options` defaults `ConvertOutputToBytes=false`/`ValidateOutputHash=false`, metadata loop parses STREAMINFO / VORBIS_COMMENT / SEEKTABLE and skips PADDING / APPLICATION / CUESHEET / PICTURE (recording presence), interleaved output `CopyFrameInt32(Span<int>)` / `CopyFrameFloat(Span<float>, bits)` (no intermediate `byte[]`; keep `ConvertOutputToBytes` only for MD5). Each change one `// AN:` line.
-- [ ] `Flac/Flac_StreamInfo.cs`, `Flac_Tags.cs` (case-insensitive multimap), `Flac_SeekTable.cs`, `Flac_DecoderOptions.cs` (`VerifyMd5`)
-- [ ] `Flac/Flac_Decoder.cs : IAudioDecoder` — `NativeFormat = Int32` (sign-extended low bits; `SourceBitDepth` = STREAMINFO bits), frame buffer carried across `ReadFrames` calls of arbitrary size, `TotalFrames` null when STREAMINFO total = 0, `EndedEarly` on `EndOfStreamException` mid-frame
-- [ ] `AudioDecoder.Open` wires `fLaC` → `Flac_Decoder`
-- [ ] Fixtures: render `AssetSource/cartesia_tts_test.wav` to FLAC (Q1: `ffmpeg -i in.wav -c:a flac out.flac`, and a 24-bit variant via `-sample_fmt s32 -bits_per_raw_sample 24`); commit under `tests/AN.Audio.Formats.Tests/Fixtures/` with `README.md` command lines
-- [ ] Tests: bit-exact `ReadFramesNative` vs the WAV master; float parity via `AudioSampleConvert`; `VerifyMd5` on; VORBIS_COMMENT tags; forward-only stream; truncated copy → `EndedEarly`; allocation; Local test on `A0v3.flac` (24-bit, 2 ch, decodes fully, MD5 verifies)
-- [ ] 2b: `SeekToFrame` — SEEKTABLE when present, else frame-header search (sync `0xFFF8/0xFFF9` + CRC-8) when the stream seeks; `CanSeek` honest
-- [ ] publish-local; tick Phase 2; commit
+- [x] `git add` both files (first commit of `Flac/`); commit message records upstream URL + commit `dc149aa`
+- [x] `// AN:` adaptations inside `Flac_ReferenceDecoder.cs`: namespace `AN.Audio.Formats.Flac`, class `internal sealed`, tabs→spaces, `Options` defaults `ConvertOutputToBytes=false`/`ValidateOutputHash=false`, metadata loop parses STREAMINFO / VORBIS_COMMENT / SEEKTABLE and skips PADDING / APPLICATION / CUESHEET / PICTURE (recording presence), interleaved output `CopyFrameInt32(Span<int>)` / `CopyFrameFloat(Span<float>, bits)` (no intermediate `byte[]`; keep `ConvertOutputToBytes` only for MD5). Each change one `// AN:` line.
+- [x] `Flac/Flac_StreamInfo.cs`, `Flac_Tags.cs` (case-insensitive multimap), `Flac_SeekTable.cs`, `Flac_DecoderOptions.cs` (`VerifyMd5`)
+- [x] `Flac/Flac_Decoder.cs : IAudioDecoder` — `NativeFormat = Int32` (sign-extended low bits; `SourceBitDepth` = STREAMINFO bits), frame buffer carried across `ReadFrames` calls of arbitrary size, `TotalFrames` null when STREAMINFO total = 0, `EndedEarly` on `EndOfStreamException` mid-frame
+- [x] `AudioDecoder.Open` wires `fLaC` → `Flac_Decoder`
+- [x] Fixtures: render `AssetSource/cartesia_tts_test.wav` to FLAC (Q1: `ffmpeg -i in.wav -c:a flac out.flac`, and a 24-bit variant via `-sample_fmt s32 -bits_per_raw_sample 24`); commit under `tests/AN.Audio.Formats.Tests/Fixtures/` with `README.md` command lines
+- [x] Tests: bit-exact `ReadFramesNative` vs the WAV master; float parity via `AudioSampleConvert`; `VerifyMd5` on; VORBIS_COMMENT tags; forward-only stream; truncated copy → `EndedEarly`; allocation; Local test on `A0v3.flac` (24-bit, 2 ch, decodes fully, MD5 verifies)
+- [x] 2b: `SeekToFrame` — SEEKTABLE when present, else frame-header search (sync `0xFFF8/0xFFF9` + CRC-8) when the stream seeks; `CanSeek` honest (built: SEEKTABLE when present, else byte-offset binary search with a forward sync scan validated by CRC-8 + STREAMINFO agreement; tests cover both plus the Salamander file)
+- [x] publish-local; tick Phase 2; commit
 
 ## Phase 3 — MP3
 

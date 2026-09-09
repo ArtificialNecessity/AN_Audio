@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using AN.Audio.Formats.Internal;
+using AN.Audio.Formats.Flac;
 using AN.Audio.Formats.Wav;
 
 namespace AN.Audio.Formats;
@@ -34,7 +35,7 @@ public static class AudioDecoder
             return container switch
             {
                 AudioDecoder_Container.Wav => new Wav_Decoder(peek),
-                AudioDecoder_Container.Flac => throw new AudioDecoder_UnsupportedException("FLAC decoding arrives in spec 50 Phase 2", AudioDecoder_Container.Flac),
+                AudioDecoder_Container.Flac => new Flac_Decoder(peek),
                 AudioDecoder_Container.Mp3 => throw new AudioDecoder_UnsupportedException("MP3 decoding arrives in spec 50 Phase 3", AudioDecoder_Container.Mp3),
                 AudioDecoder_Container.Aiff => throw new AudioDecoder_UnsupportedException("AIFF is not yet supported (Phase 4)", AudioDecoder_Container.Aiff),
                 AudioDecoder_Container.Ogg => throw new AudioDecoder_UnsupportedException("Ogg is not yet supported (Phase 4)", AudioDecoder_Container.Ogg),
