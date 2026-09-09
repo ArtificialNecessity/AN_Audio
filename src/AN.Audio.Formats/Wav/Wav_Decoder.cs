@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Buffers.Binary;
 using AN.Audio.Formats.Internal;
 
 namespace AN.Audio.Formats.Wav;
@@ -31,7 +32,8 @@ public sealed class Wav_Decoder : IAudioDecoder
     private bool _riffLengthKnown;
     private long _dataStart;               // absolute offset of the first audio byte
     private long? _dataLength;             // clamped data bytes; null = unknown (read to EOF)
-    private uint _dataDeclaredLength;
+    private long _dataDeclaredLength;      // body length as declared (ds64-resolved for RF64; header-less for Wave64)
+    private bool _dataLengthUnknown;       // the size field was a placeholder (0xFFFFFFFF, or 0 with unknown RIFF size)
     private long _dataBytesRead;
     private bool _dataSeen;
     private bool _trailingChunksRead;
@@ -57,6 +59,10 @@ public sealed class Wav_Decoder : IAudioDecoder
     public Wav_InstrumentChunk? Instrument { get; private set; }
     /// <summary>True when the RIFF header declared a usable size (false for 0 / 0xFFFFFFFF / oversize).</summary>
     public bool RiffLengthKnown => _riffLengthKnown;
+    /// <summary>RIFF, RF64/BW64 or Wave64 (Phase 4c).</summary>
+    public Wav_ContainerLayout Layout { get; private set; }
+    /// <summary>The RF64 <c>ds64</c> chunk when present.</summary>
+    public Wav_DataSize64Chunk? DataSize64 { get; private set; }
 
     /// <summary>Opens a WAV stream. The stream may be forward-only.</summary>
     public Wav_Decoder(Stream source, bool leaveOpen = false)
@@ -86,24 +92,47 @@ public sealed class Wav_Decoder : IAudioDecoder
     private void ReadHeaderAndWalk()
     {
         long start = _stream.Position;
-        Wav_ChunkId riff; uint riffSize; Wav_ChunkId wave;
-        try
+        var head = _stream.Peek(40);
+        if (head.Length < 12) throw Malformed("stream shorter than a RIFF header");
+        var riff = Wav_ChunkId.FromBytes(head);
+        ulong riffSize;
+        bool riffSizeIsPlaceholder;   // 0 / 0xFFFFFFFF in the 32-bit field
+        if (riff == Wav_ChunkId.W64Riff)
         {
-            riff = new Wav_ChunkId(_reader.ReadFourCC());
-            riffSize = _reader.ReadU32LE();
-            wave = new Wav_ChunkId(_reader.ReadFourCC());
+            // Sony Wave64: riff GUID (16) + u64 total size incl. this header + wave GUID (16)
+            if (head.Length < 40 || !head.Slice(4, 12).SequenceEqual(Wav_ChunkId.W64RiffGuidTail))
+                throw Malformed("not a Wave64 stream (riff GUID tail mismatch)");
+            if (Wav_ChunkId.FromBytes(head.Slice(24)) != Wav_ChunkId.W64Wave || !head.Slice(28, 12).SequenceEqual(Wav_ChunkId.W64ChunkGuidTail))
+                throw Malformed("not a Wave64 stream (wave GUID missing)");
+            Layout = Wav_ContainerLayout.Wave64;
+            ulong total = BinaryPrimitives.ReadUInt64LittleEndian(head.Slice(16));
+            riffSize = total >= 40 ? total - 24 : 0;   // express as "body after the 24-byte riff header" like RIFF's size field
+            riffSizeIsPlaceholder = total == 0 || total == ulong.MaxValue;
+            _stream.Skip(40);
         }
-        catch (EndOfStreamException e) { throw Malformed("stream shorter than a RIFF header", e); }
-
-        if ((riff != Wav_ChunkId.Riff && riff != Wav_ChunkId.Rf64) || wave != Wav_ChunkId.Wave)
-            throw Malformed($"not a RIFF/WAVE stream (got '{riff}' … '{wave}')");
-        if (riff == Wav_ChunkId.Rf64)
-            throw new AudioDecoder_UnsupportedException("RF64 (>4 GiB WAV) is not yet supported (Phase 4)", AudioDecoder_Container.Wav);
-
-        _riffLengthKnown = riffSize != 0 && riffSize != 0xFFFFFFFF;
-        if (_riffLengthKnown && _canSeek && start + 8 + riffSize > _stream.Length)
+        else
+        {
+            var wave = Wav_ChunkId.FromBytes(head.Slice(8));
+            bool rf64 = riff == Wav_ChunkId.Rf64 || riff == Wav_ChunkId.Bw64;
+            if ((riff != Wav_ChunkId.Riff && !rf64) || wave != Wav_ChunkId.Wave)
+                throw Malformed($"not a RIFF/WAVE stream (got '{riff}' … '{wave}')");
+            Layout = rf64 ? Wav_ContainerLayout.Rf64 : Wav_ContainerLayout.Riff;
+            uint size32 = BinaryPrimitives.ReadUInt32LittleEndian(head.Slice(4));
+            riffSize = size32;
+            riffSizeIsPlaceholder = size32 == 0 || size32 == 0xFFFFFFFF;
+            _stream.Skip(12);
+            if (rf64)
+            {
+                // EBU 3306: ds64 MUST be the first chunk; it carries the 64-bit sizes the 32-bit fields cannot
+                ReadDs64();
+                if (DataSize64 is { } ds && ds.RiffSize > 0) { riffSize = ds.RiffSize; riffSizeIsPlaceholder = false; }
+            }
+        }
+        long headerBytes = Layout == Wav_ContainerLayout.Wave64 ? 24 : 8;
+        _riffLengthKnown = !riffSizeIsPlaceholder && riffSize < long.MaxValue - 64;
+        if (_riffLengthKnown && _canSeek && start + headerBytes + (long)riffSize > _stream.Length)
             _riffLengthKnown = false;   // oversize: treat as unknown (§WAV)
-        _riffEnd = _riffLengthKnown ? start + 8 + riffSize : long.MaxValue;
+        _riffEnd = _riffLengthKnown ? start + headerBytes + (long)riffSize : long.MaxValue;
 
         // Walk until data (forward-only) or to the end (seekable)
         bool fmtSeen = false;
@@ -120,7 +149,7 @@ public sealed class Wav_Decoder : IAudioDecoder
                 }
                 // seekable: skip the data body (+pad) and keep walking for trailing metadata
                 long skipTo = _dataStart + (_dataLength ?? (_stream.Length - _dataStart));
-                if (_dataDeclaredLength % 2 == 1 && skipTo < _stream.Length) skipTo++;
+                skipTo = Math.Min(_stream.Length, skipTo + PadBytesFor(_dataDeclaredLength));
                 if (skipTo >= _stream.Length) { _trailingChunksRead = true; break; }
                 _stream.Position = skipTo;
             }
@@ -135,17 +164,76 @@ public sealed class Wav_Decoder : IAudioDecoder
         ResolveFormat();
     }
 
+    /// <summary>Alignment padding after a chunk body: RIFF/RF64 pad odd lengths to 2, Wave64 pads header+body to 8.</summary>
+    private int PadBytesFor(long bodyLength) => Layout == Wav_ContainerLayout.Wave64
+        ? (int)((8 - (24 + bodyLength) % 8) % 8)
+        : (int)(bodyLength & 1);
+
+    private int ChunkHeaderBytes => Layout == Wav_ContainerLayout.Wave64 ? 24 : 8;
+
+    /// <summary>Reads the RF64 <c>ds64</c> chunk (must directly follow <c>WAVE</c>); tolerates its absence (then sizes come from the 32-bit fields).</summary>
+    private void ReadDs64()
+    {
+        var hdr = _stream.Peek(8);
+        if (hdr.Length < 8 || Wav_ChunkId.FromBytes(hdr) != Wav_ChunkId.Ds64) return;
+        uint size = BinaryPrimitives.ReadUInt32LittleEndian(hdr.Slice(4));
+        if (size < 28) throw Malformed($"ds64 chunk is {size} bytes, need at least 28");
+        long headerOffset = _stream.Position;
+        _stream.Skip(8);
+        var body = new byte[size];
+        if (_stream.ReadFully(body) < size) throw Malformed("stream ends inside the ds64 chunk");
+        _stream.Skip(size & 1);
+        ulong riffSize = BinaryPrimitives.ReadUInt64LittleEndian(body);
+        ulong dataSize = BinaryPrimitives.ReadUInt64LittleEndian(body.AsSpan(8));
+        ulong sampleCount = BinaryPrimitives.ReadUInt64LittleEndian(body.AsSpan(16));
+        uint tableLength = BinaryPrimitives.ReadUInt32LittleEndian(body.AsSpan(24));
+        var table = new List<Wav_DataSize64Chunk.Entry>();
+        for (int i = 0; i < tableLength && 28 + (i + 1) * 12 <= body.Length; i++)
+        {
+            var e = body.AsSpan(28 + i * 12);
+            table.Add(new(Wav_ChunkId.FromBytes(e), BinaryPrimitives.ReadUInt64LittleEndian(e.Slice(4))));
+        }
+        DataSize64 = new Wav_DataSize64Chunk(riffSize, dataSize, sampleCount, table);
+        _chunks.Add(new Wav_ChunkInfo(Wav_ChunkId.Ds64, headerOffset, size, size, true, body));
+    }
+
+    /// <summary>Reads one chunk header in the current layout; false at EOF / short header. <paramref name="declared"/> is the BODY length.</summary>
+    private bool TryReadChunkHeader(out Wav_ChunkId id, out long declared, out bool sizeIsPlaceholder)
+    {
+        id = default; declared = 0; sizeIsPlaceholder = false;
+        int hdrLen = ChunkHeaderBytes;
+        var hdr = _stream.Peek(hdrLen);
+        if (hdr.Length < hdrLen) return false;
+        id = Wav_ChunkId.FromBytes(hdr);
+        if (Layout == Wav_ContainerLayout.Wave64)
+        {
+            // GUID (fourcc + 12-byte tail) + u64 size INCLUDING the 24-byte header
+            ulong total = BinaryPrimitives.ReadUInt64LittleEndian(hdr.Slice(16));
+            if (total < 24) return false;
+            declared = (long)Math.Min(total - 24, long.MaxValue / 2);
+        }
+        else
+        {
+            uint size32 = BinaryPrimitives.ReadUInt32LittleEndian(hdr.Slice(4));
+            declared = size32;
+            sizeIsPlaceholder = size32 == 0xFFFFFFFF;
+            if (sizeIsPlaceholder && DataSize64?.SizeFor(id) is { } size64)
+            {
+                declared = (long)Math.Min(size64, long.MaxValue / 2);
+                sizeIsPlaceholder = false;   // resolved through ds64
+            }
+        }
+        _stream.Skip(hdrLen);
+        return true;
+    }
+
     private enum WalkStep { Continue, Data, End }
 
     private WalkStep WalkOneChunk(ref bool fmtSeen)
     {
         long headerOffset = _stream.Position;
-        if (headerOffset + 8 > _riffEnd) return WalkStep.End;
-        var hdr = _stream.Peek(8);
-        if (hdr.Length < 8) return WalkStep.End;   // trailing junk shorter than a header, or clean EOF
-        var id = Wav_ChunkId.FromBytes(hdr);
-        uint declared = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(hdr.Slice(4));
-        _stream.Skip(8);
+        if (headerOffset + ChunkHeaderBytes > _riffEnd) return WalkStep.End;
+        if (!TryReadChunkHeader(out var id, out long declared, out bool sizeIsPlaceholder)) return WalkStep.End;   // trailing junk shorter than a header, or clean EOF
         long bodyStart = _stream.Position;
 
         // Clamp against what can exist
@@ -161,7 +249,8 @@ public sealed class Wav_Decoder : IAudioDecoder
                 _dataSeen = true;
                 _dataStart = bodyStart;
                 _dataDeclaredLength = declared;
-                bool unknown = declared == 0xFFFFFFFF || (declared == 0 && !_riffLengthKnown);
+                bool unknown = sizeIsPlaceholder || (declared == 0 && !_riffLengthKnown);
+                _dataLengthUnknown = unknown;
                 _dataLength = unknown ? null : clamped;
                 if (!unknown && !_canSeek && !_riffLengthKnown) _dataLength = declared;   // clamp happens at read time via EndedEarly
                 _chunks.Add(new Wav_ChunkInfo(id, headerOffset, declared, _dataLength ?? -1, true, null));
@@ -185,10 +274,11 @@ public sealed class Wav_Decoder : IAudioDecoder
         }
 
         bool padPresent = true;
-        if (declared % 2 == 1 && clamped == declared)
+        int pad = PadBytesFor(declared);
+        if (pad > 0 && clamped == declared)
         {
-            // RIFF pad byte — accept its absence at EOF (clap-808)
-            padPresent = _stream.Skip(1) == 1;
+            // alignment padding — accept its absence at EOF (clap-808)
+            padPresent = _stream.Skip(pad) == pad;
         }
 
         if (id == Wav_ChunkId.Fmt)
@@ -362,15 +452,15 @@ public sealed class Wav_Decoder : IAudioDecoder
     private void OnAudioEnd()
     {
         // A data chunk clamped at open (declared longer than the stream) or ending on a partial frame is a truncation (D12)
-        if (_dataLength is { } known && _dataDeclaredLength != 0xFFFFFFFF && (known < _dataDeclaredLength || known % _sourceBytesPerFrame != 0))
+        if (_dataLength is { } known && !_dataLengthUnknown && (known < _dataDeclaredLength || known % _sourceBytesPerFrame != 0))
             EndedEarly = true;
 
         if (_trailingChunksRead) return;
         _trailingChunksRead = true;
         if (_dataLength is null) return;   // data ran to EOF: nothing can follow
         if (EndedEarly) return;
-        // consume the data pad byte, then walk
-        if (_dataDeclaredLength % 2 == 1) _stream.Skip(1);
+        // consume the data alignment padding, then walk
+        _stream.Skip(PadBytesFor(_dataDeclaredLength));
         bool fmtSeen = true;
         try
         {

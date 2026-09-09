@@ -10,7 +10,7 @@ namespace AN.Audio.Formats.Tests.Support;
 /// </summary>
 public sealed class Wav_TestWriter
 {
-    private readonly List<byte[]> _chunks = new();   // complete chunks incl. header (+ pad unless suppressed)
+    private readonly List<ChunkSpec> _chunks = new();   // id + body (+ declared-length override, pad flag); emitted per layout at Build time
 
     public int Channels { get; private set; } = 2;
     public int SampleRate { get; private set; } = 48000;
@@ -141,24 +141,97 @@ public sealed class Wav_TestWriter
     {
         var ms = new MemoryStream();
         ms.Write("RIFF"u8);
-        long total = 4 + _chunks.Sum(c => (long)c.Length);
+        long total = 4 + _chunks.Sum(c => (long)RiffChunkBytes(c).Length);
         Span<byte> size = stackalloc byte[4];
         BinaryPrimitives.WriteUInt32LittleEndian(size, riffSizeOverride ?? (uint)total);
         ms.Write(size);
         ms.Write("WAVE"u8);
-        foreach (var c in _chunks) ms.Write(c);
+        foreach (var c in _chunks) ms.Write(RiffChunkBytes(c));
         var bytes = ms.ToArray();
         if (truncateToBytes >= 0 && truncateToBytes < bytes.Length) Array.Resize(ref bytes, truncateToBytes);
         return bytes;
     }
 
-    private static byte[] Chunk(string id, byte[] body, uint? declaredLength = null, bool pad = true)
+    /// <summary>
+    /// EBU 3306 RF64 (or <c>BW64</c>): 32-bit size fields written as -1 and resolved through a leading <c>ds64</c> chunk.
+    /// <paramref name="ds64DataSize"/> overrides the data size ds64 declares (to simulate a &gt; stream declaration → clamp + EndedEarly).
+    /// <paramref name="tableChunkIds"/>: other chunks whose 32-bit size is also written as -1 and resolved through the ds64 table.
+    /// </summary>
+    public byte[] BuildRf64(ulong? ds64DataSize = null, ulong? ds64SampleCount = null, bool bw64 = false, bool dataSizeMinusOne = true, params string[] tableChunkIds)
     {
-        bool needPad = pad && body.Length % 2 == 1;
-        var chunk = new byte[8 + body.Length + (needPad ? 1 : 0)];
-        Encoding.ASCII.GetBytes(id, chunk);
-        BinaryPrimitives.WriteUInt32LittleEndian(chunk.AsSpan(4), declaredLength ?? (uint)body.Length);
-        body.CopyTo(chunk, 8);
+        var body = new MemoryStream();
+        var table = new List<(string id, ulong size)>();
+        foreach (var c in _chunks)
+        {
+            bool minusOne = c.Id == "data" ? dataSizeMinusOne : tableChunkIds.Contains(c.Id);
+            if (minusOne && c.Id != "data") table.Add((c.Id, (ulong)c.Body.Length));
+            body.Write(RiffChunkBytes(c, minusOne ? 0xFFFFFFFFu : null));
+        }
+        var data = _chunks.First(c => c.Id == "data");
+        var ds64 = new byte[28 + table.Count * 12];
+        ulong riffSize = (ulong)(4 + 8 + ds64.Length + body.Length);
+        BinaryPrimitives.WriteUInt64LittleEndian(ds64, riffSize);
+        BinaryPrimitives.WriteUInt64LittleEndian(ds64.AsSpan(8), ds64DataSize ?? (ulong)data.Body.Length);
+        BinaryPrimitives.WriteUInt64LittleEndian(ds64.AsSpan(16), ds64SampleCount ?? (ulong)(data.Body.Length / Math.Max(1, BytesPerFrame)));
+        BinaryPrimitives.WriteUInt32LittleEndian(ds64.AsSpan(24), (uint)table.Count);
+        for (int i = 0; i < table.Count; i++)
+        {
+            Encoding.ASCII.GetBytes(table[i].id, ds64.AsSpan(28 + i * 12, 4));
+            BinaryPrimitives.WriteUInt64LittleEndian(ds64.AsSpan(32 + i * 12), table[i].size);
+        }
+        var ms = new MemoryStream();
+        ms.Write(bw64 ? "BW64"u8 : "RF64"u8);
+        ms.Write([0xFF, 0xFF, 0xFF, 0xFF]);
+        ms.Write("WAVE"u8);
+        ms.Write(RiffChunkBytes(new ChunkSpec("ds64", ds64, null, true)));
+        body.Position = 0; body.CopyTo(ms);
+        return ms.ToArray();
+    }
+
+    /// <summary>Sony Wave64: GUID chunk ids, u64 sizes INCLUDING the 24-byte header, 8-byte alignment (ffmpeg <c>w64.c</c> GUIDs).</summary>
+    public byte[] BuildW64(ulong? totalSizeOverride = null)
+    {
+        var body = new MemoryStream();
+        foreach (var c in _chunks)
+        {
+            var guid = new byte[16];
+            Encoding.ASCII.GetBytes(c.Id, guid);
+            Wav_ChunkId.W64ChunkGuidTail.CopyTo(guid.AsSpan(4));
+            body.Write(guid);
+            Span<byte> size = stackalloc byte[8];
+            BinaryPrimitives.WriteUInt64LittleEndian(size, (ulong)(24 + c.Body.Length));
+            body.Write(size);
+            body.Write(c.Body);
+            int pad = (int)((8 - (24 + c.Body.Length) % 8) % 8);
+            if (c.Pad) body.Write(new byte[pad]);
+        }
+        var ms = new MemoryStream();
+        var riff = new byte[16];
+        "riff"u8.CopyTo(riff);
+        Wav_ChunkId.W64RiffGuidTail.CopyTo(riff.AsSpan(4));
+        ms.Write(riff);
+        Span<byte> total = stackalloc byte[8];
+        BinaryPrimitives.WriteUInt64LittleEndian(total, totalSizeOverride ?? (ulong)(40 + body.Length));
+        ms.Write(total);
+        var wave = new byte[16];
+        "wave"u8.CopyTo(wave);
+        Wav_ChunkId.W64ChunkGuidTail.CopyTo(wave.AsSpan(4));
+        ms.Write(wave);
+        body.Position = 0; body.CopyTo(ms);
+        return ms.ToArray();
+    }
+
+    private sealed record ChunkSpec(string Id, byte[] Body, uint? DeclaredLength, bool Pad);
+
+    private static ChunkSpec Chunk(string id, byte[] body, uint? declaredLength = null, bool pad = true) => new(id, body, declaredLength, pad);
+
+    private static byte[] RiffChunkBytes(ChunkSpec c, uint? declaredOverride = null)
+    {
+        bool needPad = c.Pad && c.Body.Length % 2 == 1;
+        var chunk = new byte[8 + c.Body.Length + (needPad ? 1 : 0)];
+        Encoding.ASCII.GetBytes(c.Id, chunk);
+        BinaryPrimitives.WriteUInt32LittleEndian(chunk.AsSpan(4), declaredOverride ?? c.DeclaredLength ?? (uint)c.Body.Length);
+        c.Body.CopyTo(chunk, 8);
         return chunk;
     }
 

@@ -209,6 +209,10 @@ Correct per the RIFF/WAVE spec (MS RIFF 1991, `mmreg.h`, EBU RF64), tolerant whe
   is `data`, decode what exists and set `EndedEarly`. Unknown chunk ids are skipped but recorded in `Wav_Decoder.Chunks` as `Wav_ChunkInfo`
   (id, offset, declared length, clamped length, `PadBytePresent`, and the raw body for non-`data` chunks ≤ 1 MiB). `data` length `0xFFFFFFFF`
   (or `0` with unknown RIFF size) → unknown, read to EOF. `RF64` → `Unsupported` until Phase 4. `RiffLengthKnown` reports the header's honesty.
+  **RF64 / BW64 / Wave64 (Phase 4c, built 2026-09-09; ground truth ffmpeg `wavdec.c`/`w64.c`):** `Wav_Decoder.Layout : Wav_ContainerLayout { Riff, Rf64, Wave64 }`.
+  RF64 (`RF64`/`BW64` fourcc): the leading `ds64` chunk (`Wav_DataSize64Chunk`: riff/data/sample counts + table) resolves every 32-bit size written as
+  `0xFFFFFFFF`; a `ds64` data size beyond the stream clamps → `EndedEarly`. Wave64 (`riff` GUID, u64 sizes INCLUDING the 24-byte header, 8-byte alignment,
+  chunk GUID = fourcc + the shared tail): same walk, different header/padding arithmetic. `Wav_ChunkInfo.DeclaredLength` is now `long`. `Sniff` peeks 40 bytes.
 - **`fmt `**: `Wav_FormatTag { Pcm = 1, IeeeFloat = 3, Alaw = 6, Mulaw = 7, Extensible = 0xFFFE, … }` as an enum (overview rule 1).
   `Extensible` resolves through the 16-byte SubFormat GUID (`KSDATAFORMAT_SUBTYPE_PCM` / `_IEEE_FLOAT`) and exposes `ValidBitsPerSample` +
   `ChannelMask` (`AudioChannelMask` from Common, D15 — the earlier `Wav_ChannelMask` name is superseded); `Wav_FormatChunk.EffectiveTag` gives the

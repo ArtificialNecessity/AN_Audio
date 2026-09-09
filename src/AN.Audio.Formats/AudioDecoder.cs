@@ -12,8 +12,8 @@ namespace AN.Audio.Formats;
 /// </summary>
 public static class AudioDecoder
 {
-    /// <summary>Bytes <see cref="Open(Stream, AudioDecoder_FormatHint, bool)"/> peeks before deciding. Enough for an ID3v2 header + one MPEG frame in most cases.</summary>
-    internal const int SniffBytes = 12;
+    /// <summary>Bytes <see cref="Open(Stream, AudioDecoder_FormatHint, bool)"/> peeks before deciding: a Wave64 header is 40 bytes (riff GUID + size + wave GUID).</summary>
+    internal const int SniffBytes = 40;
     internal const int SniffBytesMp3 = 8192;
 
     /// <summary>
@@ -109,10 +109,14 @@ public static class AudioDecoder
         {
             uint tag0 = BinaryPrimitives.ReadUInt32BigEndian(leadingBytes);
             uint tag8 = BinaryPrimitives.ReadUInt32BigEndian(leadingBytes.Slice(8));
-            if ((tag0 == 0x52494646u /* RIFF */ || tag0 == 0x52463634u /* RF64 */) && tag8 == 0x57415645u /* WAVE */)
+            if ((tag0 == 0x52494646u /* RIFF */ || tag0 == 0x52463634u /* RF64 */ || tag0 == 0x42573634u /* BW64 */) && tag8 == 0x57415645u /* WAVE */)
                 return AudioDecoder_Container.Wav;
             if (tag0 == 0x464F524Du /* FORM */ && (tag8 == 0x41494646u /* AIFF */ || tag8 == 0x41494643u /* AIFC */))
                 return AudioDecoder_Container.Aiff;
+            // Sony Wave64: 'riff' GUID (16) + u64 size + 'wave' GUID (16)
+            if (tag0 == 0x72696666u /* riff */ && leadingBytes.Length >= 40
+                && leadingBytes.Slice(4, 12).SequenceEqual(Wav.Wav_ChunkId.W64RiffGuidTail) && BinaryPrimitives.ReadUInt32BigEndian(leadingBytes.Slice(24)) == 0x77617665u /* wave */)
+                return AudioDecoder_Container.Wav;
         }
         if (leadingBytes.Length >= 4)
         {
