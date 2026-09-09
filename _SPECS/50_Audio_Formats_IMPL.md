@@ -102,7 +102,7 @@ Bugs found by the tests while building: seekable `data` overrun did not set `End
 
 ## Phase 3 — MP3
 
-- [ ] Q2 first: confirm on nuget.org that `NLayer` **3.0.0** targets `net8.0` with no dependencies (the 2.0.1 non-seekable-read bug is fixed in 3.0.0); add `<PackageReference Include="NLayer" Version="3.0.0" />` to Formats only
+- [x] Q2 answered 2026-09-09 from source (`C:\PROJECTS\3P_NLayer` @ `046c7ce`): `netstandard2.0;net8.0`, zero deps, no unsafe/P-Invoke. Remaining: add `<PackageReference Include="NLayer" Version="3.0.0" />` to Formats only
 - [ ] `Mp3/Mp3_Id3v2.cs` (syncsafe size, TIT2/TPE1/TALB/TRCK/TDRC/TYER, APIC skipped) → `Mp3_Id3Tags`; parsed from the `PeekableStream` before NLayer sees the stream
 - [ ] `Mp3/Mp3_Decoder.cs : IAudioDecoder` wrapping `NLayer.MpegFile(Stream)` — `NativeFormat = Float32`, `SourceBitDepth = 0`, `TotalFrames` from `Length` when ≥ 0 else null, `GaplessInfo`; NLayer types in NO public signature
 - [ ] Sniff: ID3v2-prefixed and bare MPEG sync (two consecutive valid frame headers); hint tiebreak
@@ -113,11 +113,11 @@ Bugs found by the tests while building: seekable `data` overrun did not set `End
 
 - [ ] AIFF/AIFC (`FORM`, big-endian PCM, `MARK`/`INST` loops)
 - [ ] RF64/W64, A-law/µ-law
-- [ ] Ogg container: Vorbis (NVorbis), Opus (Concentus), FLAC-in-Ogg
+- [ ] Ogg container: Vorbis (NVorbis), Opus (Concentus — direct `OpusDecoder`, `AttemptToUseNativeLibrary=false`, test asserts no `Native*` type; cleanup: unsafe-free vendor/build per design spec audit), FLAC-in-Ogg
 - [ ] Encoders (WAV/FLAC writers) if a consumer needs export
 
 ## Open questions carried from the design spec
 
 - **Q1** ANSWERED 2026-09-08: `ffmpeg` is on the dev machine (chocolatey); fixtures rendered, command lines in `tests/AN.Audio.Formats.Tests/Fixtures/README.md`
-- **Q2** NLayer 3.0.0 package TFMs/dependencies — verify before pinning
+- **Q2** ANSWERED 2026-09-09 — see design spec "Dependency audit": NLayer + NVorbis are 100 % managed; Concentus is managed-only if the factory is bypassed, with a tracked cleanup item to vendor/rebuild it unsafe-free
 - **Q3** Per-format metadata on `AudioDecoder_Pcm`? Current answer: no — use the per-format tier (built that way; `AudioDecoder.DecodeAll(IAudioDecoder)` overload lets a caller open the per-format decoder, read metadata, then drain it)

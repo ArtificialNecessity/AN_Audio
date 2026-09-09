@@ -26,6 +26,28 @@ paths are Windows Media Foundation = native). The managed building blocks that D
 
 Ground truth for the two third-party surfaces: `_EXTERNAL_APIS/SimpleFlac_FlacDecoder.md`, `_EXTERNAL_APIS/NLayer_MpegFile.md`.
 
+### Dependency audit — managed-only / no-unsafe (2026-09-09, from source checked out at `C:\PROJECTS\3P_{NLayer,NVorbis,Concentus}`)
+
+Rule (overview I1 applied to this package): **`AN.Audio.Formats` never executes an `unsafe` or P/Invoke code path**, its own or a dependency's.
+
+| Dep | Commit audited | `unsafe` | P/Invoke | Native binaries | Verdict |
+|---|---|---|---|---|---|
+| NLayer 3.0.0 (`naudio/NLayer` `046c7ce`) | Phase 3 | none (0 hits / 46 `.cs`) | none | none | ✅ 100 % managed. TFMs `netstandard2.0;net8.0`, zero package deps. **Closes Q2 — pin 3.0.0.** |
+| NVorbis (`NVorbis/NVorbis` `abd594e`) | Phase 4 | none in source (README: "does not require P/Invoke or unsafe code") | none | none | ✅ 100 % managed. TFMs `netstandard2.0;2.1`; deps are BCL shims (`System.Memory`, `System.Runtime.CompilerServices.Unsafe` *package* — safe IL, not the keyword). |
+| Concentus 2.2.2 (`lostromb/concentus` `3885c4e`) | Phase 4 | **yes** — `AllowUnsafeBlocks=True`; `unsafe`/`fixed` confined to `Native/*.cs` | **yes** — `LibraryImport`/`DllImport` to `kernel32`, `libdl`, `libSystem`, `libopus` in `Native/` | none in the `Concentus` package (they ship in the separate `Concentus.Native` package) | ⚠️ Managed codec (`Opus/`, `Celt/`, `Silk/`, `Common/`) is clean (only `stackalloc` into `Span<T>`), but the shipped DLL carries unsafe IL + P/Invoke stubs, and `OpusCodecFactory.Create*` **probes for a native libopus at runtime by default** (`AttemptToUseNativeLibrary = true`). |
+
+**Concentus policy when Phase 4 Opus is picked up:**
+1. Never go through `OpusCodecFactory`. Construct the managed classes directly (`new OpusDecoder(rate, channels)`, `new OpusMSDecoder(...)`;
+   the factory marks them `[Obsolete]` but they ARE the managed implementation) and set `OpusCodecFactory.AttemptToUseNativeLibrary = false`
+   once at type-init as belt-and-braces. A test asserts the returned decoder type is `Concentus.Structs.OpusDecoder`, never `Native*`.
+2. **Eventual cleanup (tracked here):** the assembly still contains unsafe/P/Invoke code we never call. To ship a provably unsafe-free,
+   native-free dependency, subsume the managed subset as source like SimpleFlac (D6) — `Concentus/{Opus,Celt,Silk,Common,Enums}` minus
+   `Native/`, built with `AllowUnsafeBlocks=false` (BSD-3, ≈90 files) — or fork the package build with `Native/` excluded. Do this when
+   Opus lands or when a consumer needs an auditable no-unsafe dependency tree, whichever comes first.
+
+Our own code: `AN.Audio.Common`, `AN.Audio.Formats` and `AN.Audio.Formats.Tests` build with `AllowUnsafeBlocks=false`; the subsumed
+`Flac_ReferenceDecoder.cs` uses no `unsafe`.
+
 ## Decisions
 
 | # | Decision | Rationale |
@@ -330,15 +352,14 @@ Built 2026-09-08, commit `f31655c`. Published `0.260908.235755`. 110 Formats tes
 ### Phase 4 — later formats (each its own short addendum when started)
 - [ ] AIFF/AIFC (`FORM`, big-endian PCM, `MARK`/`INST` loops — the other sampler-library staple)
 - [ ] RF64/W64 (>4 GiB WAV), A-law/µ-law
-- [ ] Ogg container: Vorbis via NVorbis, Opus via Concentus, FLAC-in-Ogg via our decoder
+- [ ] Ogg container: Vorbis via NVorbis, Opus via Concentus (managed classes only, factory bypassed — see Dependency audit; cleanup item: unsafe-free Concentus build/vendor), FLAC-in-Ogg via our decoder
 - [ ] Encoders (WAV/FLAC writers) if a consumer needs export
 
 ## Open questions
 
 - **Q1** ANSWERED 2026-09-08: `ffmpeg` is on the dev machine (chocolatey). FLAC fixtures (16- and 24-bit) rendered from
   `AssetSource/cartesia_tts_test.wav`; command lines in `tests/AN.Audio.Formats.Tests/Fixtures/README.md`. MP3 fixture: Phase 3, same tool.
-- **Q2** NLayer 3.0.0 vs 2.0.1: 3.0.0 fixes the non-seekable read bug (D2 needs it); confirm on `nuget.org` that the `NLayer` 3.0.0 package
-  itself still targets `net8.0` with no dependencies before pinning (the search result says so; verify at implementation time).
+- **Q2** ANSWERED 2026-09-09 (Dependency audit above): NLayer 3.0.0 source targets `netstandard2.0;net8.0`, zero package deps, no unsafe, no P/Invoke. Pin 3.0.0 in Phase 3.
 - **Q3** Should `AudioDecoder_Pcm` also carry the per-format metadata (`Wav_SamplerChunk`, `Flac_Tags`) as an optional `object? Metadata`,
   or must clients wanting metadata use the per-format tier? Built: per-format tier only (keeps the generic type dumb); the
   `AudioDecoder.DecodeAll(IAudioDecoder)` overload lets a caller open `Wav_Decoder`/`Flac_Decoder`, read metadata, then drain the audio.
