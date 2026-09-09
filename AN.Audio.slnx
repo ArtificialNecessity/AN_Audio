@@ -1,12 +1,13 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/AN.Audio.Common/AN.Audio.Common.csproj" />
     <Project Path="src/AN.Audio/AN.Audio.csproj" />
     <Project Path="src/AN.Audio.Midi/AN.Audio.Midi.csproj" />
-
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SimpleAudioTest/SimpleAudioTest.csproj" />
     <Project Path="tests/AN.Audio.Tests/AN.Audio.Tests.csproj" />
+    <Project Path="tests/AN.Audio.Common.Tests/AN.Audio.Common.Tests.csproj" />
     <Project Path="tests/SimpleMidiTest/SimpleMidiTest.csproj" />
     <Project Path="tests/AN.Audio.Midi.Tests/AN.Audio.Midi.Tests.csproj" />
   </Folder>

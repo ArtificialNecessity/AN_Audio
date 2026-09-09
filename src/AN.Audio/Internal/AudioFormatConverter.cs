@@ -215,30 +215,31 @@ internal sealed class AudioFormatConverter
     private static float ReadSampleAsFloat(Span<byte> buf, int frame, int channel, int channelCount, AudioFormat fmt)
     {
         int sampleIndex = frame * channelCount + channel;
-        if (fmt.Format == SampleFormat.Float32)
+        switch (fmt.Format)
         {
-            var floats = MemoryMarshal.Cast<byte, float>(buf);
-            return floats[sampleIndex];
-        }
-        else
-        {
-            var shorts = MemoryMarshal.Cast<byte, short>(buf);
-            return shorts[sampleIndex] / 32768f;
+            case SampleFormat.Float32:
+                return MemoryMarshal.Cast<byte, float>(buf)[sampleIndex];
+            case SampleFormat.Int16:
+                // Scaling rule lives in AN.Audio.Common (spec 50 D4/D15)
+                return AudioSampleConvert.Int16ToFloat(MemoryMarshal.Cast<byte, short>(buf)[sampleIndex]);
+            default:
+                throw new NotSupportedException($"Device backends support Int16/Float32 only, not {fmt.Format}");
         }
     }
 
     private static void WriteSampleFromFloat(Span<byte> buf, int frame, int channel, int channelCount, AudioFormat fmt, float value)
     {
         int sampleIndex = frame * channelCount + channel;
-        if (fmt.Format == SampleFormat.Float32)
+        switch (fmt.Format)
         {
-            var floats = MemoryMarshal.Cast<byte, float>(buf);
-            floats[sampleIndex] = value;
-        }
-        else
-        {
-            var shorts = MemoryMarshal.Cast<byte, short>(buf);
-            shorts[sampleIndex] = (short)(value * 32767f);
+            case SampleFormat.Float32:
+                MemoryMarshal.Cast<byte, float>(buf)[sampleIndex] = value;
+                break;
+            case SampleFormat.Int16:
+                MemoryMarshal.Cast<byte, short>(buf)[sampleIndex] = AudioSampleConvert.FloatToInt16(value);
+                break;
+            default:
+                throw new NotSupportedException($"Device backends support Int16/Float32 only, not {fmt.Format}");
         }
     }
 

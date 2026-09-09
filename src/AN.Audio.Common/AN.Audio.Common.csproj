@@ -6,11 +6,11 @@
     <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <RootNamespace>AN.Audio</RootNamespace>
     <IsPackable>true</IsPackable>
-    <PackageId>ArtificialNecessity.Audio</PackageId>
-    <Description>Cross-platform audio playback via direct PInvoke to OS audio APIs (WASAPI, ALSA, CoreAudio). Zero native dependencies.</Description>
+    <PackageId>ArtificialNecessity.Audio.Common</PackageId>
+    <Description>Shared PCM vocabulary for the ArtificialNecessity.Audio packages: AudioFormat, SampleFormat, AudioChannelMask, AudioBufferView, AudioSampleConvert. No OS, no I/O, no decoders.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <PackageProjectUrl>https://github.com/ArtificialNecessity/AN_Audio</PackageProjectUrl>
@@ -21,11 +21,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="AN.Audio.Tests" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="../AN.Audio.Common/AN.Audio.Common.csproj" />
+    <InternalsVisibleTo Include="AN.Audio.Common.Tests" />
   </ItemGroup>
 
   <ItemGroup>

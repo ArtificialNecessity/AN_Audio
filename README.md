@@ -53,7 +53,7 @@ The callback is the only extension point. It runs on a high-priority audio threa
 
 | Type | Purpose |
 |------|---------|
-| `AudioFormat` | Sample rate, channel count, sample format (Int16 or Float32) |
+| `AudioFormat` | Sample rate, channel count, sample format (from `ArtificialNecessity.Audio.Common`; device outputs accept Int16 or Float32) |
 | `AudioCallback` | `delegate int(Span<byte>, int, AudioFormat)` — fills the buffer |
 | `IAudioOutput` | Start/Stop/Dispose, fixed consumer `Format`, native `DeviceFormat`, estimated `LatencyMs`, device policy and events |
 | `AudioOutput` | Static factory — creates the right backend for the current OS |
@@ -126,15 +126,16 @@ $env:LOCAL_NUGET_REPO = "C:\path\to\local\feed"
 cmd\publish-local.cmd            # or: dotnet run --file cmd/publish-local.cs
 ```
 
-This builds, packs `ArtificialNecessity.Audio`, and deploys the `.nupkg` to your local feed. Versioning is automatic (timestamp-based).
+This builds, packs every package (`ArtificialNecessity.Audio.Common`, `.Audio`, `.Audio.Midi`, `.Audio.Formats`), and deploys the `.nupkg` files to your local feed with one shared version. Versioning is automatic (timestamp-based).
 
 ## Project Structure
 
 ```
 AN.Audio/
+├── src/AN.Audio.Common/             # Shared PCM vocabulary (AN.Audio.Common.dll): AudioFormat, SampleFormat,
+│                                    #   AudioChannelMask, AudioBufferView, AudioSampleConvert — referenced by Audio + Formats
 ├── src/AN.Audio/                    # PCM output + device management (AN.Audio.dll)
 │   ├── IAudioOutput.cs              # Interface + AudioCallback delegate
-│   ├── AudioFormat.cs               # Format descriptor + SampleFormat enum
 │   ├── AudioOutput.cs               # Platform-detecting factory
 │   └── Platforms/
 │       ├── Windows/
