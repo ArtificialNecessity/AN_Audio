@@ -35,7 +35,10 @@ public sealed class Wav_Decoder : IAudioDecoder
     private long _dataBytesRead;
     private bool _dataSeen;
     private bool _trailingChunksRead;
-    private byte[]? _nativeBlock;          // only for ReadFrames(float) on non-float sources
+    private byte[]? _nativeBlock;          // ReadFrames(float) on non-float sources
+    private byte[]? _wireBlock;            // G.711: companded bytes read from the stream before expansion
+    private short[]? _g711;                // A-law / µ-law expansion table when the wire format is companded (Phase 4a)
+    private int _sourceBytesPerFrame;      // bytes per frame ON THE WIRE (== NativeFormat.BytesPerFrame except for G.711: 1 byte/sample → Int16)
     private bool _disposed;
 
     public Wav_FormatChunk Format { get; private set; } = null!;
@@ -218,6 +221,7 @@ public sealed class Wav_Decoder : IAudioDecoder
         int container = f.ContainerBytes;
         SampleFormat sf;
         AudioDecoder_SourceEncoding enc;
+        int sourceBitDepth = f.ValidBitsPerSample;
         switch (tag)
         {
             case Wav_FormatTag.Pcm:
@@ -242,7 +246,14 @@ public sealed class Wav_Decoder : IAudioDecoder
                 break;
             case Wav_FormatTag.Alaw:
             case Wav_FormatTag.Mulaw:
-                throw new AudioDecoder_UnsupportedException($"{tag} (WAVE_FORMAT 0x{(ushort)tag:X4}) is not yet supported (Phase 4)", AudioDecoder_Container.Wav);
+                // G.711 (Phase 4a): 8-bit companded on the wire, expanded to Int16 (the only lossless linear representation)
+                if (container != 1)
+                    throw new AudioDecoder_UnsupportedException($"{tag} with {f.BitsPerSample} bits per sample (must be 8)", AudioDecoder_Container.Wav);
+                enc = tag == Wav_FormatTag.Alaw ? AudioDecoder_SourceEncoding.Alaw : AudioDecoder_SourceEncoding.Mulaw;
+                _g711 = tag == Wav_FormatTag.Alaw ? G711.ALawToInt16 : G711.MuLawToInt16;
+                sf = SampleFormat.Int16;
+                sourceBitDepth = 8;
+                break;
             case Wav_FormatTag.Adpcm:
             case Wav_FormatTag.ImaAdpcm:
             case Wav_FormatTag.Mpeg:
@@ -255,11 +266,11 @@ public sealed class Wav_Decoder : IAudioDecoder
         }
 
         NativeFormat = new AudioFormat(f.SampleRate, f.Channels, sf);
-        int bpf = NativeFormat.BytesPerFrame;
-        long? totalFrames = _dataLength is { } len ? len / bpf : null;
+        _sourceBytesPerFrame = _g711 is null ? NativeFormat.BytesPerFrame : f.Channels;
+        long? totalFrames = _dataLength is { } len ? len / _sourceBytesPerFrame : null;
         Info = new AudioDecoder_StreamInfo(
             AudioDecoder_Container.Wav, enc, f.SampleRate, f.Channels,
-            SourceBitDepth: f.ValidBitsPerSample, TotalFrames: totalFrames, CanSeek: _canSeek);
+            SourceBitDepth: sourceBitDepth, TotalFrames: totalFrames, CanSeek: _canSeek);
     }
 
     // ── read path ──
@@ -270,7 +281,29 @@ public sealed class Wav_Decoder : IAudioDecoder
         int bpf = NativeFormat.BytesPerFrame;
         if (destination.Length % bpf != 0)
             throw new ArgumentException($"destination length {destination.Length} is not a multiple of BytesPerFrame {bpf}", nameof(destination));
+        if (_g711 is null) return ReadSourceFrames(destination);
 
+        // G.711: one companded byte per sample on the wire, Int16 in the caller's buffer (NativeFormat = Int16)
+        int channels = NativeFormat.Channels;
+        _wireBlock ??= new byte[BlockFrames * _sourceBytesPerFrame];   // NOT _nativeBlock: ReadFrames(float) may be reading into that one
+        var dst = MemoryMarshal.Cast<byte, short>(destination);
+        int framesWanted = destination.Length / bpf, total = 0;
+        while (total < framesWanted)
+        {
+            int block = Math.Min(BlockFrames, framesWanted - total);
+            int got = ReadSourceFrames(_wireBlock.AsSpan(0, block * _sourceBytesPerFrame));
+            if (got == 0) break;
+            G711.Expand(_wireBlock.AsSpan(0, got * channels), dst.Slice(total * channels, got * channels), _g711);
+            total += got;
+            if (got < block) break;
+        }
+        return total;
+    }
+
+    /// <summary>Reads whole frames of the WIRE layout (<see cref=\"_sourceBytesPerFrame\"/> bytes each) straight from the stream; returns frames.</summary>
+    private int ReadSourceFrames(Span<byte> destination)
+    {
+        int bpf = _sourceBytesPerFrame;
         long remaining = _dataLength is { } len ? len - _dataBytesRead : long.MaxValue;
         int want = (int)Math.Min(destination.Length, remaining);
         want -= want % bpf;
@@ -329,7 +362,7 @@ public sealed class Wav_Decoder : IAudioDecoder
     private void OnAudioEnd()
     {
         // A data chunk clamped at open (declared longer than the stream) or ending on a partial frame is a truncation (D12)
-        if (_dataLength is { } known && _dataDeclaredLength != 0xFFFFFFFF && (known < _dataDeclaredLength || known % NativeFormat.BytesPerFrame != 0))
+        if (_dataLength is { } known && _dataDeclaredLength != 0xFFFFFFFF && (known < _dataDeclaredLength || known % _sourceBytesPerFrame != 0))
             EndedEarly = true;
 
         if (_trailingChunksRead) return;
@@ -353,7 +386,7 @@ public sealed class Wav_Decoder : IAudioDecoder
         if (!_canSeek) throw new NotSupportedException("the underlying stream does not support seeking");
         if (frame < 0) throw new ArgumentOutOfRangeException(nameof(frame));
         if (Info.TotalFrames is { } total && frame > total) frame = total;
-        long bytes = frame * NativeFormat.BytesPerFrame;
+        long bytes = frame * _sourceBytesPerFrame;
         _stream.Position = _dataStart + bytes;
         _dataBytesRead = bytes;
         FramesRead = frame;

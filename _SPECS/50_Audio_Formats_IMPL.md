@@ -116,7 +116,7 @@ Bugs found by the tests while building: seekable `data` overrun did not set `End
 
 ## Phase 4 — items picked for the 2026-09-09 session (after Phase 3)
 
-- [ ] 4a: A-law / µ-law in `Wav_Decoder` (`Wav_FormatTag.Alaw/Mulaw`, EXTENSIBLE sub-formats too): expand via G.711 tables to `NativeFormat = Int16`, `Info.Encoding = Alaw/Mulaw`, `SourceBitDepth = 8`; `Wav_TestWriter` gains both; bit-exact tests against the reference expansion formula
+- [x] 4a: A-law / µ-law in `Wav_Decoder` (`Wav_FormatTag.Alaw/Mulaw`, EXTENSIBLE sub-formats too): `Internal/G711.cs` tables → `NativeFormat = Int16`, `Info.Encoding = Alaw/Mulaw`, `SourceBitDepth = 8`; `_sourceBytesPerFrame` separated from `NativeFormat.BytesPerFrame` (read, seek, TotalFrames, truncation check); `WavG711Tests` (14): all 256 codes vs an independently written reference + G.711 anchor values, bit-exact native/float seekable + forward-only, EXTENSIBLE GUID, seek in wire bytes, truncation → `EndedEarly`, 16-bit container → `Unsupported`; bug caught: the expansion scratch aliased `_nativeBlock` (now `_wireBlock`)
 - [ ] 4c: RF64 (`ds64` chunk: RIFF size, `data` size, sample count, table) and W64 (Sony Wave64, 16-byte GUID chunk ids, 8-byte sizes) in `Wav_Decoder`; `Sniff` recognises `riff\x2E\x91\xCF\x11…` W64 GUID; synthesised tests (small files with RF64/W64 headers; `data` > 4 GiB declared but clamped to the stream → `EndedEarly` path)
 
 ## Phase 4 — later (own addendum each; not scheduled)

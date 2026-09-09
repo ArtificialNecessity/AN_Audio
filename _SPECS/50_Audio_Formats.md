@@ -214,7 +214,9 @@ Correct per the RIFF/WAVE spec (MS RIFF 1991, `mmreg.h`, EBU RF64), tolerant whe
   `ChannelMask` (`AudioChannelMask` from Common, D15 — the earlier `Wav_ChannelMask` name is superseded); `Wav_FormatChunk.EffectiveTag` gives the
   resolved tag, `ContainerBytes` the per-sample container (from `BlockAlign / Channels`, else `ceil(bits/8)`). Supported now: PCM 8 (unsigned), 16, 24, 32
   (incl. 20/24 valid bits in 24/32 containers; `Info.SourceBitDepth` = valid bits, `NativeFormat` = container), IEEE float 32/64, any channel count.
-  A-law/µ-law: Phase 4 (tables are trivial). ADPCM/MP3-in-WAV: `Unsupported`, naming the tag.
+  **A-law/µ-law (Phase 4a, built 2026-09-09):** ITU-T G.711 expansion tables (`Internal/G711.cs`, Sun `g711.c` formulas; µ-law ±32124, A-law ±32256)
+  → `NativeFormat = Int16`, `Info.Encoding = Alaw/Mulaw`, `SourceBitDepth = 8`; also via EXTENSIBLE `KSDATAFORMAT_SUBTYPE_ALAW/MULAW`. The decoder now
+  distinguishes wire bytes per frame (1/sample) from `NativeFormat.BytesPerFrame` (2/sample) for `TotalFrames`, seek and the truncation check. ADPCM/MP3-in-WAV: `Unsupported`, naming the tag.
 - **`data` before `fmt `** (seen in the wild) → on a seekable stream the walk skips the body, finds `fmt`, then seeks back; otherwise
   `FormatException` ("fmt chunk after data on a non-seekable stream").
 - **Metadata surfaced** (all optional, read only when present, never required for audio): `smpl` → `Wav_SamplerChunk { MidiUnityNote,
