@@ -68,6 +68,7 @@ internal sealed unsafe class WinMm_MidiInPort
             if (r != WinMm_Result.NoError) { Close(); return r; }
         }
 
+        ResetDriverAnchor();   // dwParam2 counts from THIS midiInStart
         r = WinMm_MidiInterop.midiInStart(_handle);
         if (r != WinMm_Result.NoError) { Close(); return r; }
         return WinMm_Result.NoError;
@@ -108,6 +109,24 @@ internal sealed unsafe class WinMm_MidiInPort
 
     // ── driver thread ─────────────────────────────────────────────────────────────────────────
 
+    private static readonly long s_ticksPerMs = Stopwatch.Frequency / 1000;
+    /// <summary>Stopwatch tick that corresponds to the driver's dwParam2 == 0 (midiInStart). Self-calibrating: delivery latency is
+    /// never negative, so the smallest observed (arrival - driverMs) is the best estimate of the true origin and only ever moves down.</summary>
+    private long _driverAnchorTicks = long.MaxValue;
+
+    /// <summary>Convert the driver's integer-ms-since-Start stamp into the ArrivalTicks time base (SPEC-30 D6 amended).
+    /// Driver thread only. Resolution is the driver's 1 ms; the anchor converges from above within a few fast deliveries.</summary>
+    private long ConvertDriverTimestamp(uint driverMs, long arrivalTicks)
+    {
+        long driverRelativeTicks = driverMs * s_ticksPerMs;
+        long candidate = arrivalTicks - driverRelativeTicks;
+        if (candidate < _driverAnchorTicks) _driverAnchorTicks = candidate;
+        return _driverAnchorTicks + driverRelativeTicks;
+    }
+
+    /// <summary>Forget the anchor (new midiInStart = new driver origin).</summary>
+    private void ResetDriverAnchor() => _driverAnchorTicks = long.MaxValue;
+
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
     private static void MidiInProc(nint hmi, uint uMsg, nuint dwInstance, nuint dwParam1, nuint dwParam2)
     {
@@ -139,8 +158,11 @@ internal sealed unsafe class WinMm_MidiInPort
             case WinMm_MidiInMessage.MoreData:
             {
                 WinMm_MidiInterop.UnpackShortMessage(dwParam1, out byte status, out byte d1, out byte d2);
+                // D6 (amended): dwParam2 is integer ms since midiInStart on the driver's clock. Convert it into the
+                // ArrivalTicks time base so ArrivalTicks - DriverTimestamp reads as the WinMM delivery latency.
+                long driverTicks = ConvertDriverTimestamp((uint)dwParam2, arrival);
                 // D25: WinMM speaks MIDI 1.0 only; wrap as a UMP MT 0x1/0x2 word (shift+or, allocation-free). Group is always 0 (one cable per port).
-                var message = MidiInput_Message.FromMidi1(arrival, (long)(uint)dwParam2, status, d1, d2, Index);
+                var message = MidiInput_Message.FromMidi1(arrival, driverTicks, status, d1, d2, Index);
                 if (msg == WinMm_MidiInMessage.MoreData) _owner.NoteDriverLag();
                 _owner.DeliverFromDriver(in message);
                 break;

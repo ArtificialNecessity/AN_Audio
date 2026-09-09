@@ -21,8 +21,21 @@ public readonly struct MidiInput_Message
     // ---- storage (internal; 32 bytes total, asserted by test — the size is NOT a public promise, D25) ----------
     /// <summary>Stopwatch.GetTimestamp() at driver-callback entry (D6).</summary>
     public long ArrivalTicks { get; }
-    /// <summary>Backend-native clock. WinMM: ms since midiInStart. UMP backends: 64-bit host clock.</summary>
+    /// <summary>When the DRIVER received the message, expressed in the same Stopwatch tick base as <see cref="ArrivalTicks"/> (D6 amended
+    /// 2026-09-09). WinMM: dwParam2 (integer ms since midiInStart) anchored to Stopwatch ticks by the port with a self-calibrating
+    /// minimum, so the value is quantised to 1 ms and the first few messages of a port read slightly late while the anchor converges.
+    /// <c>ArrivalTicks - DriverTimestamp</c> is the OS delivery latency (see <see cref="DeliveryLagTicks"/>).</summary>
     public long DriverTimestamp { get; }
+
+    /// <summary>How long the OS took to hand this message to us: driver receipt to our callback entry, in Stopwatch ticks.
+    /// This is the part of MIDI-in latency the application cannot see any other way. Never negative; 1 ms resolution on WinMM.</summary>
+    public long DeliveryLagTicks => ArrivalTicks - DriverTimestamp;
+
+    /// <summary><see cref="DeliveryLagTicks"/> in milliseconds.</summary>
+    public double DeliveryLagMs => DeliveryLagTicks * s_msPerTick;
+
+    private static readonly double s_msPerTick = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+
     /// <summary>UMP word 0: mt|group|status|byteA|byteB.</summary>
     internal uint Word0 { get; }
     /// <summary>UMP word 1 (MT 0x4 only): 32-bit data. Zero for 32-bit packets.</summary>

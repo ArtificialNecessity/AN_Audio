@@ -45,6 +45,8 @@ Console.WriteLine();
 // Consumer thread: stands in for an audio callback draining the ring every few ms.
 var stop = new CancellationTokenSource();
 long messagesSeen = 0;
+// Delivery lag = ArrivalTicks - DriverTimestamp: driver receipt -> our callback entry (D6 amended). Written by the drain thread, read on 's'.
+long lagCount = 0; double lagSumMs = 0, lagMinMs = double.MaxValue, lagMaxMs = 0;
 var startTicks = Stopwatch.GetTimestamp();
 var drainThread = new Thread(() =>
 {
@@ -57,10 +59,13 @@ var drainThread = new Thread(() =>
             ref readonly var m = ref batch[i];
             messagesSeen++;
             double sinceStartMs = (m.ArrivalTicks - startTicks) * 1000.0 / Stopwatch.Frequency;
+            double lagMs = m.DeliveryLagMs;
+            lagSumMs += lagMs; if (lagMs < lagMinMs) lagMinMs = lagMs; if (lagMs > lagMaxMs) lagMaxMs = lagMs;
+            Volatile.Write(ref lagCount, lagCount + 1);
             string portName = midi.TryGetPort(m.Port, out var info) ? info.Name : $"port{m.Port.Value}";
             var colour = m.IsNoteOn ? ConsoleColor.White : m.IsNoteOff ? ConsoleColor.Gray : ConsoleColor.DarkCyan;
             var (st, d1, d2) = m.RawMidi1Bytes;   // diagnostics only (D25) — musical code uses typed accessors
-            Log(colour, $"{sinceStartMs,10:F3}ms  drv={m.DriverTimestamp,8}ms  [{portName}]  {st:X2} {d1:X2} {d2:X2}  {m}");
+            Log(colour, $"{sinceStartMs,10:F3}ms  lag={lagMs,6:F2}ms  [{portName}]  {st:X2} {d1:X2} {d2:X2}  {m}");
         }
         if (n == 0) Thread.Sleep(2);
     }
@@ -84,6 +89,8 @@ while (true)
     if (key.Key == ConsoleKey.S)
     {
         Log(ConsoleColor.Yellow, $"[stats] messages={messagesSeen} ring cap={midi.Ring.CurrentCapacity}/{midi.Ring.MaxCapacity} grew={midi.Ring.GrowCount} dropped={midi.Ring.DroppedCount} lag={midi.Ring.LagCount} sysexDiscarded={midi.SysExDiscardedCount}");
+        long lagN = Volatile.Read(ref lagCount);
+        Log(ConsoleColor.Yellow, lagN == 0 ? "        delivery lag: (no messages yet)" : $"        delivery lag (driver receipt -> our callback): min={lagMinMs:F2}ms avg={lagSumMs / lagN:F2}ms max={lagMaxMs:F2}ms over {lagN} msgs (1 ms driver resolution)");
         foreach (var p in midi.OpenPorts) Log(ConsoleColor.Yellow, $"        open: {p}");
     }
 }
