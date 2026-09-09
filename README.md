@@ -19,7 +19,7 @@ AN.Audio calls them directly through PInvoke and manual COM vtable dispatch, pro
 |----------|---------|--------|
 | Windows | WASAPI (shared mode, event-driven) | ✅ Working |
 | macOS | AudioQueue (AudioToolbox) | ✅ Working |
-| Linux | ALSA (`libasound.so.2`) | Implemented in source; runtime availability depends on ALSA and a usable output device |
+| Linux | ALSA (`libasound.so.2`) | ✅ Working |
 | Android | AAudio | 🔲 Future |
 | iOS | AudioQueue (AudioToolbox) | 🔲 Future |
 

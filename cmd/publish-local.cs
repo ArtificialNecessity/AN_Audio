@@ -5,7 +5,9 @@
 // AN.Audio.Build.props. The timestamp is captured ONCE here and passed to MSBuild so every DLL and
 // nupkg carries the exact same version (no inter-project skew).
 //
-// Packages (one per project, independent): ArtificialNecessity.Audio (src/AN.Audio), ArtificialNecessity.Audio.Midi (src/AN.Audio.Midi).
+// Packages (one per library project; Audio and Formats depend on Common, Midi on nothing):
+// ArtificialNecessity.Audio.Common, .Audio, .Audio.Midi, .Audio.Formats — see PackageIds below.
+// Keep that list in sync with the IsPackable projects in AN.Audio.slnx and with cmd/nuget-publish-audio.cs.
 //
 // Usage:
 //   dotnet run --file cmd/publish-local.cs                  # Debug build + pack + deploy
@@ -53,6 +55,7 @@ string repoRoot = FindRepoRoot(Directory.GetCurrentDirectory())
     ?? Fail("Cannot find repo root (looked for AN.Audio.Build.props walking up from cwd)");
 
 string solutionPath   = Path.Combine(repoRoot, "AN.Audio.slnx");
+string[] PackageIds   = ["ArtificialNecessity.Audio.Common", "ArtificialNecessity.Audio", "ArtificialNecessity.Audio.Midi", "ArtificialNecessity.Audio.Formats"];
 
 // ── LOCAL_NUGET_REPO ────────────────────────────────────────────────────────────────
 string? localNuGetFeedPath = Environment.GetEnvironmentVariable("LOCAL_NUGET_REPO");
@@ -74,7 +77,8 @@ WriteColored($"Local NuGet feed: {localNuGetFeedPath}", ConsoleColor.DarkGray);
 
 if (dryRun)
 {
-    WriteColored($"\n[DRY RUN] Would build + pack {solutionPath}, deploying ArtificialNecessity.Audio.{stamp.PackageVersion}.nupkg and ArtificialNecessity.Audio.Midi.{stamp.PackageVersion}.nupkg to {localNuGetFeedPath}", ConsoleColor.Yellow);
+    WriteColored($"\n[DRY RUN] Would build + pack {solutionPath}, deploying to {localNuGetFeedPath}:", ConsoleColor.Yellow);
+    foreach (string id in PackageIds) WriteColored($"  {id}.{stamp.PackageVersion}.nupkg", ConsoleColor.Yellow);
     return 0;
 }
 
@@ -87,7 +91,7 @@ if (Run("dotnet", $"build \"{solutionPath}\" -c {configuration} /nodeReuse:false
     return Failed($"dotnet build exited with code {buildExit}");
 
 // ── [2/2] Pack every IsPackable project in the solution (DeployToLocalNuGet target copies each to the feed) ──
-WriteColored("\n[2/2] Packing ArtificialNecessity.Audio + ArtificialNecessity.Audio.Midi...", ConsoleColor.Green);
+WriteColored($"\n[2/2] Packing {string.Join(", ", PackageIds)}...", ConsoleColor.Green);
 if (Run("dotnet", $"pack \"{solutionPath}\" -c {configuration} --no-build /nodeReuse:false /p:LocalNuGetFeedPath=\"{localNuGetFeedPath}\" {stamp.MsBuildArgs}") is int packExit and not 0)
     return Failed($"dotnet pack exited with code {packExit}");
 
@@ -95,8 +99,9 @@ if (Run("dotnet", $"pack \"{solutionPath}\" -c {configuration} --no-build /nodeR
 var deployed = new DirectoryInfo(localNuGetFeedPath).GetFiles("ArtificialNecessity.Audio*.nupkg")
     .Where(f => f.LastWriteTimeUtc >= deployStartUtc).OrderBy(f => f.Name).ToList();
 
-if (deployed.Count < 2)
-    return Failed($"Expected 2 packages (Audio, Audio.Midi) in {localNuGetFeedPath}, found {deployed.Count}");
+var missing = PackageIds.Where(id => !deployed.Any(f => f.Name.Equals($"{id}.{stamp.PackageVersion}.nupkg", StringComparison.OrdinalIgnoreCase))).ToList();
+if (missing.Count > 0)
+    return Failed($"Expected {PackageIds.Length} packages in {localNuGetFeedPath}; missing: {string.Join(", ", missing)}");
 
 WriteColored("\nPUBLISH SUCCEEDED — deployed packages:", ConsoleColor.Green);
 foreach (var pkg in deployed)

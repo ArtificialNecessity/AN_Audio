@@ -192,7 +192,7 @@ checkbox ticked, commit (multi-line messages via here-string piped to `git commi
 
 | Area | State |
 |---|---|
-| PCM output | ✅ Windows WASAPI, ✅ macOS AudioQueue, ✅ Linux ALSA (source) |
+| PCM output | ✅ Windows WASAPI, ✅ macOS AudioQueue, ✅ Linux ALSA |
 | Output device mgmt | ✅ all three |
 | MIDI input | ✅ Windows WinMM (hardware-validated); macOS/Linux planned |
 | Formats | ✅ WAV (Phase 1), ✅ FLAC incl. seeking (Phase 2), ◻ MP3 (Phase 3, NLayer 3.0.0), ◻ AIFF/RF64/A-law/Ogg (Phase 4) |

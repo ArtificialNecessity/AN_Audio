@@ -26,7 +26,7 @@ operating system's audio stack.
 
 | Area | Interface / factory | Windows | macOS | Linux | Android | iOS | Spec |
 |---|---|---|---|---|---|---|---|
-| PCM output | `IAudioOutput` / `AudioOutput` | ✅ WASAPI shared, event-driven | ✅ AudioQueue | ✅ ALSA (source) | ◻ AAudio | ◻ AudioQueue | `10_Audio_Bringup.md` |
+| PCM output | `IAudioOutput` / `AudioOutput` | ✅ WASAPI shared, event-driven | ✅ AudioQueue | ✅ ALSA | ◻ AAudio | ◻ AudioQueue | `10_Audio_Bringup.md` |
 | Output device mgmt | `IAudioDeviceManager` | ✅ MMDevice + `IMMNotificationClient` | ✅ property listeners | ✅ hints + reactive loss | ◻ | ◻ | `20_Audio_Device_Management.md` |
 | PCM **input (capture)** | `IAudioInput` / `AudioInput` | ◻ WASAPI capture | ◻ AudioQueue input | ◻ ALSA capture | ◻ AAudio | ◻ | **TBD `40_Audio_Capture.md`** |
 | **MIDI input** | `IMidiInput` / `MidiInput` | ✅ WinMM `midiIn*` (Sprint 1, hardware-validated) | ◻ CoreMIDI | ◻ ALSA seq | ◻ `android.media.midi` | ◻ CoreMIDI | `30_MidiInput.md` |

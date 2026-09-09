@@ -11,7 +11,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>ArtificialNecessity.Audio</PackageId>
     <Description>Cross-platform audio playback via direct PInvoke to OS audio APIs (WASAPI, ALSA, CoreAudio). Zero native dependencies.</Description>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReadmeFile>README-nuget.md</PackageReadmeFile>
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <PackageProjectUrl>https://github.com/ArtificialNecessity/AN_Audio</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ArtificialNecessity/AN_Audio</RepositoryUrl>
@@ -29,7 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)../../README.md" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)../../README-nuget.md" Pack="true" PackagePath="/" />
     <None Include="$(MSBuildThisFileDirectory)../../LICENSE.txt" Pack="true" PackagePath="/" />
   </ItemGroup>
 

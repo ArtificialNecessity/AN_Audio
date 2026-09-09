@@ -10,7 +10,7 @@
 > library's: audio input, MIDI in/out and the remaining platforms are all in scope for AN.Audio (see the overview's matrix).
 
 - [x] Milestone 1 — Core abstraction + Windows WASAPI backend
-- [x] Milestone 2 — Linux ALSA backend (implemented in source; runtime availability depends on ALSA + a usable device)
+- [x] Milestone 2 — Linux ALSA backend (working; validated on a Linux box 2026-09)
 - [x] Milestone 3 — macOS CoreAudio backend
 - [ ] Milestone 4 — Android AAudio backend (future)
 

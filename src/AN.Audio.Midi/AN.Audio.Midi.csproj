@@ -11,7 +11,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>ArtificialNecessity.Audio.Midi</PackageId>
     <Description>Cross-platform MIDI input via direct PInvoke to OS MIDI APIs (WinMM). Zero native dependencies. Independent of ArtificialNecessity.Audio.</Description>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReadmeFile>README-nuget.md</PackageReadmeFile>
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <PackageProjectUrl>https://github.com/ArtificialNecessity/AN_Audio</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ArtificialNecessity/AN_Audio</RepositoryUrl>
@@ -25,7 +25,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)../../README.md" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)../../README-nuget.md" Pack="true" PackagePath="/" />
     <None Include="$(MSBuildThisFileDirectory)../../LICENSE.txt" Pack="true" PackagePath="/" />
   </ItemGroup>
 

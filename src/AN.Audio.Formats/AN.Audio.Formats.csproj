@@ -11,7 +11,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>ArtificialNecessity.Audio.Formats</PackageId>
     <Description>Pure managed audio format decoding (WAV, FLAC, MP3) with streaming, forward-only-stream support and zero-copy native PCM reads. Depends only on ArtificialNecessity.Audio.Common.</Description>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReadmeFile>README-nuget.md</PackageReadmeFile>
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <PackageProjectUrl>https://github.com/ArtificialNecessity/AN_Audio</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ArtificialNecessity/AN_Audio</RepositoryUrl>
@@ -29,7 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)../../README.md" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)../../README-nuget.md" Pack="true" PackagePath="/" />
     <None Include="$(MSBuildThisFileDirectory)../../LICENSE.txt" Pack="true" PackagePath="/" />
     <None Include="Flac/LICENSE-SimpleFlac.txt" Pack="true" PackagePath="/" />
   </ItemGroup>

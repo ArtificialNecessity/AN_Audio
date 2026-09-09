@@ -2,8 +2,10 @@
 // nuget-publish-audio.cs — Cross-platform Release pack + push of the AN.Audio packages to NuGet.org.
 //
 // Versioning is timestamp-based (v2) via AN.Audio.Build.props; the stamp is captured once here so
-// every DLL and nupkg shares one version. Two independent packages, one per project:
-// ArtificialNecessity.Audio (src/AN.Audio) and ArtificialNecessity.Audio.Midi (src/AN.Audio.Midi).
+// every DLL and nupkg shares one version. Four packages, one per library project, pushed in
+// dependency order: ArtificialNecessity.Audio.Common (src/AN.Audio.Common) first, then .Audio (src/AN.Audio),
+// .Audio.Midi (src/AN.Audio.Midi) and .Audio.Formats (src/AN.Audio.Formats). Audio and Formats depend on Common;
+// Midi depends on nothing. The NuGet page readme for all four is README-nuget.md (set in each csproj).
 //
 // Usage:
 //   dotnet run --file cmd/nuget-publish-audio.cs              # pack + push
@@ -39,7 +41,9 @@ string releaseOutputDir = Path.Combine(repoRoot, "artifacts", "Packages", "Relea
 string? localFeed       = Environment.GetEnvironmentVariable("LOCAL_NUGET_REPO");
 string? apiKey          = Environment.GetEnvironmentVariable("NUGET_API_KEY");
 const string NuGetSource = "https://api.nuget.org/v3/index.json";
-string[] packageIds     = ["ArtificialNecessity.Audio", "ArtificialNecessity.Audio.Midi"];
+// Dependency order: Common FIRST so a consumer restoring Audio/Formats never sees a dangling dependency on the feed.
+// Keep in sync with the IsPackable projects in AN.Audio.slnx (and the list in cmd/publish-local.cs).
+string[] packageIds     = ["ArtificialNecessity.Audio.Common", "ArtificialNecessity.Audio", "ArtificialNecessity.Audio.Midi", "ArtificialNecessity.Audio.Formats"];
 
 var stamp = BuildStamp.Now();
 string[] expectedPackages = packageIds.Select(id => Path.Combine(releaseOutputDir, $"{id}.{stamp.PackageVersion}.nupkg")).ToArray();
