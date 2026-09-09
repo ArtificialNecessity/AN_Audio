@@ -1,6 +1,6 @@
 # 50 — AN.Audio.Formats: managed audio FORMAT decoding (WAV, FLAC, MP3, …)
 
-- **Status:** Draft v2 (2026-09-08) — decisions D1–D16 agreed with the user; SimpleFlac subsumed (D6 done); Phase 1 not started
+- **Status:** v2 (2026-09-08) — D1–D16 agreed; **Phase 1 built** (Common + Formats skeleton + WAV, published as 0.260908.234621; MusicStudio adapter 1d pending in that repo); Phase 2 in progress
 - **Package:** `ArtificialNecessity.Audio.Formats` (`AN.Audio.Formats.dll`), `src/AN.Audio.Formats/`, namespace `AN.Audio.Formats`
 - **Depends only on** `ArtificialNecessity.Audio.Common` (D15: the shared PCM vocabulary) and, from Phase 3, `NLayer`. Never on
   `ArtificialNecessity.Audio` itself. Pure managed, `AnyCPU`, NativeAOT-safe.
@@ -41,7 +41,7 @@ Ground truth for the two third-party surfaces: `_EXTERNAL_APIS/SimpleFlac_FlacDe
 | D9 | **Directory per format**: `Wav/`, `Flac/`, `Mp3/`, later `Aiff/`, `Ogg/`. Root = generic tier; `Internal/` = shared machinery (bit reader, look-ahead stream, sample conversion). | User request; mirrors `Platforms/<OS>/` in the other feature areas. |
 | D10 | **Unknown length is a first-class state.** `AudioDecoder_StreamInfo.TotalFrames` is `long?`; `null` for RIFF size `0`/`0xFFFFFFFF`, FLAC STREAMINFO total = 0, MP3 without Xing/VBRI on a non-seekable stream. Consumers grow buffers. | Streaming writers and live streams do this. |
 | D11 | **Seeking is optional and honest.** `CanSeek` is true only when the underlying stream seeks AND the format supports it (WAV always; FLAC via SEEKTABLE or frame-header scan; MP3 via NLayer's frame index). `SeekToFrame` on `CanSeek == false` throws `NotSupportedException`. | Same shape everywhere (I2). |
-| D12 | **Errors**: malformed input → `AudioDecoder_FormatException : InvalidDataException` with a format-specific message; unsupported-but-valid input (e.g. WAV ADPCM, Ogg until Phase 4) → `AudioDecoder_UnsupportedException : NotSupportedException` naming the encoding. Truncated **trailing** data (stream ended mid-frame) is NOT an error: the decoder returns the frames it has and reports `EndedEarly = true`. | Half-downloaded files should play what exists. |
+| D12 | **Errors**: malformed input → `AudioDecoder_FormatException : IOException` (the spec first said `InvalidDataException`, which is sealed in .NET; `IOException` is its base) with a format-specific message; unsupported-but-valid input (e.g. WAV ADPCM, Ogg until Phase 4) → `AudioDecoder_UnsupportedException : NotSupportedException` naming the encoding. Truncated **trailing** data (stream ended mid-frame) is NOT an error: the decoder returns the frames it has and reports `EndedEarly = true`. | Half-downloaded files should play what exists. |
 | D13 | **Read path allocates only at open and on frame-size growth.** `ReadFrames(Span<float>)` performs no `new` in steady state (test: `GC.GetAllocatedBytesForCurrentThread()` delta 0 across a decode loop after warm-up). Not a hot-path guarantee in the I3 sense — decoders are called from worker threads, never from the audio callback. | Consistent with overview rule 5 without over-promising. |
 | D14 | **Overview spec amendment.** `00_AN_Audio_Overview.md` lists decoding as a permanent non-goal *of the OS-facing layer*; that stays true. This package is a sibling feature area in the same repo that touches no OS API. Update the overview's feature table, repository shape and non-goals wording in Phase 1. | Keep the living document truthful. |
 | D15 | **`ArtificialNecessity.Audio.Common` (`src/AN.Audio.Common/`, namespace `AN.Audio`) holds the MINIMUM shared vocabulary** — `AudioFormat`, `SampleFormat`, `AudioChannelMask`, `AudioBufferView` — and NOTHING else (no OS, no I/O, no decoders). `AN.Audio` and `AN.Audio.Formats` (and Midi/Capture if they ever need a PCM type) reference it. **Amends spec 30 D27**: "no inter-project references" becomes "no inter-project references EXCEPT to `AN.Audio.Common`". `AudioFormat`/`SampleFormat` MOVE out of `AN.Audio` (same namespace `AN.Audio`, so consumers recompile without source changes; the package gains a dependency). | Decoder output must land in an `IAudioOutput` callback buffer with zero conversions/copies when formats agree; that needs ONE `AudioFormat` type both sides speak. |
@@ -169,7 +169,7 @@ Correct per the RIFF/WAVE spec (MS RIFF 1991, `mmreg.h`, EBU RF64), tolerant whe
   is `data`, decode what exists and set `EndedEarly`. Unknown chunk ids are skipped but recorded (id, offset, length) in `Wav_Decoder.Chunks`.
 - **`fmt `**: `Wav_FormatTag { Pcm = 1, IeeeFloat = 3, Alaw = 6, Mulaw = 7, Extensible = 0xFFFE, … }` as an enum (overview rule 1).
   `Extensible` resolves through the 16-byte SubFormat GUID (`KSDATAFORMAT_SUBTYPE_PCM` / `_IEEE_FLOAT`) and exposes `ValidBitsPerSample` +
-  `ChannelMask` (`Wav_ChannelMask` flags enum, `SPEAKER_*`). Supported now: PCM 8 (unsigned), 16, 24, 32 (incl. 20/24 valid bits in
+  `ChannelMask` (`AudioChannelMask` from Common, D15 — the earlier `Wav_ChannelMask` name is superseded). Supported now: PCM 8 (unsigned), 16, 24, 32 (incl. 20/24 valid bits in
   32 containers), IEEE float 32/64, any channel count. A-law/µ-law: Phase 4 (tables are trivial). ADPCM/MP3-in-WAV: `Unsupported`.
 - **`data` before `fmt `** (seen in the wild) → buffered/seek back when the stream seeks; otherwise `FormatException` ("fmt after data on a non-seekable stream").
 - **Metadata surfaced** (all optional, read only when present, never required for audio): `smpl` → `Wav_SamplerChunk { MidiUnityNote,
@@ -257,15 +257,15 @@ Fixture provenance: `AssetSource/cartesia_tts_test.wav` (ours) is the WAV master
 ## Phases
 
 ### Phase 1 — package skeleton + WAV done right (unblocks MusicStudio today)
-- [ ] `src/AN.Audio.Common/` (D15): move `AudioFormat`/`SampleFormat` from `AN.Audio` (`git mv`), widen `SampleFormat`, add `AudioChannelMask`, `AudioBufferView`,
+- [x] `src/AN.Audio.Common/` (D15): move `AudioFormat`/`SampleFormat` from `AN.Audio` (`git mv`), widen `SampleFormat`, add `AudioChannelMask`, `AudioBufferView`,
       `AudioSampleConvert` (moved from `AN.Audio/Internal/`); `AN.Audio` gets the `ProjectReference`; existing `AN.Audio.Tests` still pass; spec 30 D27 + overview amended
-- [ ] `src/AN.Audio.Formats/` project, csproj per the Midi one (`IsPackable`, README/LICENSE pack items, `InternalsVisibleTo` tests); add to `AN.Audio.slnx`
-- [ ] Generic tier: `IAudioDecoder` (incl. `NativeFormat`/`ReadFramesNative`, D16), `AudioDecoder_StreamInfo`, enums, exceptions, `AudioDecoder.Open/Sniff/DecodeAll`, `AudioDecoder_Pcm`
-- [ ] `Internal/PeekableStream`, `Internal/BitReader`
-- [ ] `Wav/` per §WAV including `smpl`/`cue`/`LIST` metadata and streaming reads; `ReadFramesNative` for PCM = a straight byte copy from the stream
-- [ ] `tests/AN.Audio.Formats.Tests` with `Wav_TestWriter`, `ForwardOnlyStream`, the WAV rows + sniff + facade + allocation rows
-- [ ] `_EXTERNAL_APIS/` notes; overview spec amendment (D14); README package list
-- [ ] `cmd/publish-local` → LocalNuGet; bump `ANAudioVersion` in MusicStudio
+- [x] `src/AN.Audio.Formats/` project, csproj per the Midi one (`IsPackable`, README/LICENSE pack items, `InternalsVisibleTo` tests); add to `AN.Audio.slnx`
+- [x] Generic tier: `IAudioDecoder` (incl. `NativeFormat`/`ReadFramesNative`, D16), `AudioDecoder_StreamInfo`, enums, exceptions, `AudioDecoder.Open/Sniff/DecodeAll`, `AudioDecoder_Pcm`
+- [x] `Internal/PeekableStream`, `Internal/BitReader`
+- [x] `Wav/` per §WAV including `smpl`/`cue`/`LIST` metadata and streaming reads; `ReadFramesNative` for PCM = a straight byte copy from the stream
+- [x] `tests/AN.Audio.Formats.Tests` with `Wav_TestWriter`, `ForwardOnlyStream`, the WAV rows + sniff + facade + allocation rows
+- [x] `_EXTERNAL_APIS/` notes; overview spec amendment (D14); README package list
+- [x] `cmd/publish-local` → LocalNuGet; bump `ANAudioVersion` in MusicStudio
 - [ ] **MusicStudio**: `InstrumentSample.Decode` → `AudioDecoder.DecodeAll` + mono→stereo up-mix / >2ch→stereo down-mix in ONE adapter
       (`InstrumentSample.FromDecoded`), `SourceBitsPerSample` from `Info.SourceBitDepth`; delete the hand-rolled RIFF walker; `InstrumentSampleChecks`
       gain the odd-pad and EXTENSIBLE cases; `FormatDescription` gains the container (`FLAC · 48000 Hz · 24-bit …`). Verify `clap-808.wav` loads.

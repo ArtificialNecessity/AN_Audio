@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="$(MSBuildThisFileDirectory)../../AN.Audio.Build.props" />
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <RootNamespace>AN.Audio.Formats</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>ArtificialNecessity.Audio.Formats</PackageId>
+    <Description>Pure managed audio format decoding (WAV, FLAC, MP3) with streaming, forward-only-stream support and zero-copy native PCM reads. Depends only on ArtificialNecessity.Audio.Common.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+    <PackageProjectUrl>https://github.com/ArtificialNecessity/AN_Audio</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ArtificialNecessity/AN_Audio</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <Authors>David Jeske</Authors>
+    <Copyright>(C)opyright David Jeske 2026</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AN.Audio.Formats.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../AN.Audio.Common/AN.Audio.Common.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../../README.md" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)../../LICENSE.txt" Pack="true" PackagePath="/" />
+    <None Include="Flac/LICENSE-SimpleFlac.txt" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>

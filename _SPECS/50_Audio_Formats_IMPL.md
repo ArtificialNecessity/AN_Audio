@@ -6,7 +6,7 @@
 
 ## Handoff — what the implementing session must know
 
-- **Trigger case:** `C:\Users\david\Documents\AudioSamples\Instruments\NoRedistribution\99Sounds_Drum_Samples\clap-808.wav` — trailing `id3 ` chunk, length 215 (odd), pad byte omitted by the writer; RIFF size is otherwise correct. Must decode. Second trigger: `C:\PROJECTS\3P_SalamanderGrandPiano\Samples\A0v3.flac` (24-bit stereo, 2.3 MB; 641 siblings). Neither file may be committed.
+- **Trigger case:** `C:\Users\david\Documents\AudioSamples\Instruments\NoRedistribution\99Sounds_Drum_Samples\clap-808.wav` — trailing `id3 ` chunk, length 215 (odd), pad byte omitted by the writer; RIFF size is otherwise correct. Header (verified 2026-09-08): PCM **mono 44100 Hz 24-bit** (blockAlign 3), `data` 142080 bytes = 47360 frames — an earlier note saying 16-bit was wrong. Must decode. Second trigger: `C:\PROJECTS\3P_SalamanderGrandPiano\Samples\A0v3.flac` (24-bit stereo, 2.3 MB; 641 siblings). Neither file may be committed.
 - **`AudioFormat` moves, it is not duplicated.** `git mv src/AN.Audio/AudioFormat.cs src/AN.Audio.Common/AudioFormat.cs`; namespace stays `AN.Audio`; consumers (Mirica, Arcane Siege, MusicStudio) recompile unchanged and receive `ArtificialNecessity.Audio.Common` transitively. `SampleFormat` widens to `UInt8, Int16, Int24, Int32, Float32, Float64`; the device backends in `AN.Audio` must still REJECT anything but `Int16`/`Float32` at `Start` (find every `switch` on `SampleFormat` — the `_ => throw` arms already do this; add explicit cases where a switch is exhaustive-by-accident).
 - **Spec 30 D27 changes** ("no inter-project references") → "none EXCEPT to `AN.Audio.Common`". Edit `30_MidiInput.md` D27 and `00_AN_Audio_Overview.md` (feature table row, repository shape, non-goals wording, packaging rule) in Phase 1 — D14/D15.
 - **Streaming is not optional.** Every decoder must pass its tests through the forward-only stream wrapper (no `Seek`, `Length` throws, 1–97-byte reads). Design for that first; `DecodeAll` is a loop over `ReadFrames`.
@@ -37,28 +37,28 @@
 
 ## Phase 1b — `AN.Audio.Formats` skeleton + generic tier
 
-- [ ] `src/AN.Audio.Formats/AN.Audio.Formats.csproj` — PackageId `ArtificialNecessity.Audio.Formats`, RootNamespace `AN.Audio.Formats`, `ProjectReference` → Common, NO NLayer yet; add to slnx; `InternalsVisibleTo AN.Audio.Formats.Tests`
-- [ ] `AudioDecoder_Enums.cs` (`AudioDecoder_Container`, `AudioDecoder_SourceEncoding`, `AudioDecoder_FormatHint`), `AudioDecoder_StreamInfo.cs`, `AudioDecoder_Exceptions.cs` (`AudioDecoder_FormatException : InvalidDataException`, `AudioDecoder_UnsupportedException : NotSupportedException`)
-- [ ] `IAudioDecoder.cs` exactly as the design spec block (`Info`, `NativeFormat`, `FramesRead`, `EndedEarly`, `ReadFrames(Span<float>)`, `ReadFramesNative(Span<byte>)`, `ReadFramesNative(AudioBufferView)`, `SeekToFrame`)
-- [ ] `Internal/PeekableStream.cs` — wraps any `Stream`; buffers the first N bytes for sniff + header, replays, then passes through; `CanSeek` mirrors inner; `Position` correct in both modes; `leaveOpen`
-- [ ] `Internal/BitReader.cs` — little/big-endian header reads over `PeekableStream` (WAV now, AIFF later)
-- [ ] `AudioDecoder.cs` — `Sniff(ReadOnlySpan<byte>, hint)` per the sniff table; `Open(Stream, hint, leaveOpen)`, `Open(string path)` (`FileStream` 64 KiB `SequentialScan`, hint from extension); `DecodeAll(...)` → `AudioDecoder_Pcm` (capacity hint = `TotalFrames`, growable otherwise)
-- [ ] `AudioDecoder_Pcm.cs` (`Info`, `float[] Interleaved`, `FrameCount`, `EndedEarly`)
-- [ ] `tests/AN.Audio.Formats.Tests/` project; `Support/ForwardOnlyStream.cs` (no seek, `Length` throws, random 1–97-byte reads, seeded); sniff tests (each magic, ID3-prefixed MP3 header bytes, garbage → Unsupported, hint tiebreak); `PeekableStream` tests (replay across boundary, seekable + forward-only)
-- [ ] Commit: `AN.Audio.Formats: package skeleton, IAudioDecoder, sniffing, PeekableStream (spec 50 Phase 1b)`
+- [x] `src/AN.Audio.Formats/AN.Audio.Formats.csproj` — PackageId `ArtificialNecessity.Audio.Formats`, RootNamespace `AN.Audio.Formats`, `ProjectReference` → Common, NO NLayer yet; add to slnx; `InternalsVisibleTo AN.Audio.Formats.Tests`
+- [x] `AudioDecoder_Enums.cs` (`AudioDecoder_Container`, `AudioDecoder_SourceEncoding`, `AudioDecoder_FormatHint`), `AudioDecoder_StreamInfo.cs`, `AudioDecoder_Exceptions.cs` (`AudioDecoder_FormatException : IOException` (the spec first said `InvalidDataException`, which is sealed in .NET; `IOException` is its base), `AudioDecoder_UnsupportedException : NotSupportedException`)
+- [x] `IAudioDecoder.cs` exactly as the design spec block (`Info`, `NativeFormat`, `FramesRead`, `EndedEarly`, `ReadFrames(Span<float>)`, `ReadFramesNative(Span<byte>)`, `ReadFramesNative(AudioBufferView)`, `SeekToFrame`)
+- [x] `Internal/PeekableStream.cs` — wraps any `Stream`; buffers the first N bytes for sniff + header, replays, then passes through; `CanSeek` mirrors inner; `Position` correct in both modes; `leaveOpen`
+- [x] `Internal/BitReader.cs` — little/big-endian header reads over `PeekableStream` (WAV now, AIFF later)
+- [x] `AudioDecoder.cs` — `Sniff(ReadOnlySpan<byte>, hint)` per the sniff table; `Open(Stream, hint, leaveOpen)`, `Open(string path)` (`FileStream` 64 KiB `SequentialScan`, hint from extension); `DecodeAll(...)` → `AudioDecoder_Pcm` (capacity hint = `TotalFrames`, growable otherwise)
+- [x] `AudioDecoder_Pcm.cs` (`Info`, `float[] Interleaved`, `FrameCount`, `EndedEarly`)
+- [x] `tests/AN.Audio.Formats.Tests/` project; `Support/ForwardOnlyStream.cs` (no seek, `Length` throws, random 1–97-byte reads, seeded); sniff tests (each magic, ID3-prefixed MP3 header bytes, garbage → Unsupported, hint tiebreak); `PeekableStream` tests (replay across boundary, seekable + forward-only)
+- [x] Commit: `AN.Audio.Formats: package skeleton, IAudioDecoder, sniffing, PeekableStream (spec 50 Phase 1b)`
 
 ## Phase 1c — WAV done right (§WAV of the design spec)
 
-- [ ] `Wav/Wav_FormatChunk.cs` — `Wav_FormatTag` enum (`Pcm=1, IeeeFloat=3, Alaw=6, Mulaw=7, Extensible=0xFFFE`, …), EXTENSIBLE parse (cbSize, `ValidBitsPerSample`, `ChannelMask` → `AudioChannelMask`, SubFormat GUID → `KSDATAFORMAT_SUBTYPE_PCM`/`_IEEE_FLOAT` as named `Guid` consts)
-- [ ] `Wav/Wav_ChunkIndex.cs` — every chunk seen: `Wav_ChunkId` (branded FourCC), offset, declared length, clamped length
-- [ ] `Wav/Wav_Decoder.cs` — chunk walk per §WAV: RIFF size 0/0xFFFFFFFF/oversize → unknown length; **odd chunk without pad byte accepted**; overrun `data` clamped + `EndedEarly`; `fmt` after `data` handled when seekable else `FormatException`; unknown chunks skipped+recorded; chunks after `data` read lazily after audio on forward-only streams
-- [ ] PCM read path: `NativeFormat` = UInt8/Int16/Int24/Int32/Float32/Float64 by `fmt`; `ReadFramesNative` = straight byte copy in 4096-frame blocks; `ReadFrames` = native block → `AudioSampleConvert` → caller span; `TotalFrames` from clamped `data` length when known
-- [ ] Metadata: `Wav_SamplerChunk` (`smpl`: `MidiUnityNote`, `MidiPitchFraction`, `Wav_SampleLoop[]`), `Wav_CuePoint[]` (`cue `), `Wav_InfoTags` (`LIST/INFO`), `Wav_InstrumentChunk` (`inst`); `bext` raw in `Chunks`
-- [ ] Unsupported (valid) encodings → `AudioDecoder_UnsupportedException` naming the tag (ADPCM, MP3-in-WAV, A-law/µ-law until Phase 4)
-- [ ] Tests: `Support/Wav_TestWriter.cs` synthesises every fixture in memory — 8/16/24/32 PCM, float32/64, 1/2/6 ch, EXTENSIBLE with masks + 20-valid-bits-in-24, **odd chunk WITHOUT pad**, RIFF size 0 and 0xFFFFFFFF, `data` overrun, `smpl`+`cue`+`LIST` present, chunks after `data`, `fmt` after `data` (seekable ok / forward-only throws); bit-exact expectations for both `ReadFrames` and `ReadFramesNative`; every case run seekable AND through `ForwardOnlyStream`; `DecodeAll == concat(ReadFrames)`; `leaveOpen`; D13 allocation test (0 bytes across 100 reads after warm-up)
-- [ ] Local (uncommitted-file) test, `[Trait("Category","Local")]`, skipped when absent: decode `clap-808.wav`; assert 16-bit, frame count = 142080 / blockAlign, chunk index lists `SAUR`, `LIST`, `id3 ` with the last one un-padded
-- [ ] `cmd/publish-local` → verify `ArtificialNecessity.Audio.Common`, `.Audio`, `.Audio.Formats` land in `C:\PROJECTS\LocalNuGet` with one shared version; note the version in this file: `______`
-- [ ] Tick Phase 1 in `50_Audio_Formats.md`; commit: `AN.Audio.Formats: WAV decoder (PCM/float/EXTENSIBLE, tolerant chunk walk, smpl/cue/LIST), streaming + zero-copy reads (spec 50 Phase 1c)`
+- [x] `Wav/Wav_FormatChunk.cs` — `Wav_FormatTag` enum (`Pcm=1, IeeeFloat=3, Alaw=6, Mulaw=7, Extensible=0xFFFE`, …), EXTENSIBLE parse (cbSize, `ValidBitsPerSample`, `ChannelMask` → `AudioChannelMask`, SubFormat GUID → `KSDATAFORMAT_SUBTYPE_PCM`/`_IEEE_FLOAT` as named `Guid` consts)
+- [x] `Wav/Wav_ChunkIndex.cs` — every chunk seen: `Wav_ChunkId` (branded FourCC), offset, declared length, clamped length
+- [x] `Wav/Wav_Decoder.cs` — chunk walk per §WAV: RIFF size 0/0xFFFFFFFF/oversize → unknown length; **odd chunk without pad byte accepted**; overrun `data` clamped + `EndedEarly`; `fmt` after `data` handled when seekable else `FormatException`; unknown chunks skipped+recorded; chunks after `data` read lazily after audio on forward-only streams
+- [x] PCM read path: `NativeFormat` = UInt8/Int16/Int24/Int32/Float32/Float64 by `fmt`; `ReadFramesNative` = straight byte copy in 4096-frame blocks; `ReadFrames` = native block → `AudioSampleConvert` → caller span; `TotalFrames` from clamped `data` length when known
+- [x] Metadata: `Wav_SamplerChunk` (`smpl`: `MidiUnityNote`, `MidiPitchFraction`, `Wav_SampleLoop[]`), `Wav_CuePoint[]` (`cue `), `Wav_InfoTags` (`LIST/INFO`), `Wav_InstrumentChunk` (`inst`); `bext` raw in `Chunks`
+- [x] Unsupported (valid) encodings → `AudioDecoder_UnsupportedException` naming the tag (ADPCM, MP3-in-WAV, A-law/µ-law until Phase 4)
+- [x] Tests: `Support/Wav_TestWriter.cs` synthesises every fixture in memory — 8/16/24/32 PCM, float32/64, 1/2/6 ch, EXTENSIBLE with masks + 20-valid-bits-in-24, **odd chunk WITHOUT pad**, RIFF size 0 and 0xFFFFFFFF, `data` overrun, `smpl`+`cue`+`LIST` present, chunks after `data`, `fmt` after `data` (seekable ok / forward-only throws); bit-exact expectations for both `ReadFrames` and `ReadFramesNative`; every case run seekable AND through `ForwardOnlyStream`; `DecodeAll == concat(ReadFrames)`; `leaveOpen`; D13 allocation test (0 bytes across 100 reads after warm-up)
+- [x] Local (uncommitted-file) test, `[Trait("Category","Local")]`, skipped when absent: decode `clap-808.wav`; assert 24-bit mono, frame count = 142080 / 3, chunk index lists `SAUR`, `LIST`, `id3 ` with the last one un-padded
+- [x] `cmd/publish-local` → verify `ArtificialNecessity.Audio.Common`, `.Audio`, `.Audio.Formats` land in `C:\PROJECTS\LocalNuGet` with one shared version; note the version in this file: `0.260908.234621`
+- [x] Tick Phase 1 in `50_Audio_Formats.md`; commit: `AN.Audio.Formats: WAV decoder (PCM/float/EXTENSIBLE, tolerant chunk walk, smpl/cue/LIST), streaming + zero-copy reads (spec 50 Phase 1c)`
 
 ### Phase 1d — MusicStudio adapter (done in the `C:\PROJECTS\AN_MusicStudio` workspace, NOT here)
 
