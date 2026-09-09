@@ -386,8 +386,9 @@ Built 2026-09-09. 134 Formats tests green (24 MP3). NLayer is used as the frame 
 - [ ] MusicStudio filter adds `*.mp3`
 
 ### Phase 4 — later formats (each its own short addendum when started)
+Built 2026-09-09: **4a** A-law/µ-law (G.711) and **4c** RF64/BW64 + Wave64, both inside `Wav_Decoder` (see §WAV). 161 Formats tests.
+- [x] A-law/µ-law (4a); RF64/BW64/W64 (4c)
 - [ ] AIFF/AIFC (`FORM`, big-endian PCM, `MARK`/`INST` loops — the other sampler-library staple)
-- [ ] RF64/W64 (>4 GiB WAV), A-law/µ-law
 - [ ] Ogg container: Vorbis via NVorbis, Opus via Concentus (managed classes only, factory bypassed — see Dependency audit; cleanup item: unsafe-free Concentus build/vendor), FLAC-in-Ogg via our decoder
 - [ ] Encoders (WAV/FLAC writers) if a consumer needs export
 

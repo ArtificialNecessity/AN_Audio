@@ -36,7 +36,7 @@ When auditing or citing `3P_*` source, record findings WITH the upstream commit 
 - **Language:** C# (`LangVersion=preview`), TFMs `net8.0;net9.0;net10.0` for libraries, `net10.0` for tests. SDK 10.0.x.
 - **OS APIs (direct PInvoke / COM vtables, no wrappers):** Windows WASAPI + MMDevice (`AN.Audio`), WinMM `midiIn*` (`AN.Audio.Midi`);
   macOS AudioQueue/AudioToolbox; Linux ALSA (`libasound.so.2`). Ground truth for each in `_EXTERNAL_APIS/`.
-- **Formats (pure managed, no OS API):** our WAV; subsumed SimpleFlac for FLAC; NLayer for MP3 (Phase 3).
+- **Formats (pure managed, no OS API):** our WAV (incl. RF64/W64, G.711); subsumed SimpleFlac for FLAC; NLayer 3.0.0's `MpegFrameDecoder` for MP3 frames (framing ours).
 - **Analyzers:** `ArtificialNecessity.CodeAnalyzers` (e.g. AN0002: public `const` → `static readonly`) via `AN.Audio.Build.props`.
 - **Tests:** xunit 2.x; `[Trait("Category","Local")]` marks tests that read non-redistributable files and skip when absent.
 - **Tools present on the dev box:** `ffmpeg` (chocolatey) — renders test fixtures; command lines recorded in `tests/AN.Audio.Formats.Tests/Fixtures/README.md`.
@@ -100,20 +100,24 @@ and only from projects that need a PCM type (Audio, Formats — not Midi).
   - `IAudioDecoder.cs` — `Info`, `NativeFormat` (zero-copy layout, D16), `FramesRead`, `EndedEarly`, `ReadFrames(Span<float>)`, `ReadFramesNative(Span<byte>|AudioBufferView)`, `SeekToFrame`.
   - `AudioDecoder.cs` — `Open(Stream|path)`, `Sniff` (content only; hint is a tiebreaker), `DecodeAll(...)`, `HintFromExtension`.
   - `AudioDecoder_Enums.cs`, `AudioDecoder_StreamInfo.cs`, `AudioDecoder_Pcm.cs`, `AudioDecoder_Exceptions.cs` (`_FormatException : IOException`, `_UnsupportedException : NotSupportedException`).
-  - `Internal/PeekableStream.cs` — bounded look-ahead + replay over any stream (why non-seekable sources work); `Internal/BitReader.cs` (LE/BE header reads); `Internal/MpegFrameHeader.cs` (MPEG header validation for sniffing).
-  - `Wav/` — `Wav_Decoder.cs` (tolerant chunk walk: RIFF size 0/0xFFFFFFFF/oversize, odd chunk without pad byte, clamped `data` + `EndedEarly`, `fmt` after `data` when seekable, lazy trailing chunks on forward-only streams),
-    `Wav_FormatChunk.cs` (`Wav_FormatTag`, EXTENSIBLE → `EffectiveTag`), `Wav_ChunkId.cs` (`Wav_ChunkId` FourCC, `Wav_ChunkInfo`), `Wav_Metadata.cs` (`Wav_SamplerChunk`, `Wav_SampleLoop`, `Wav_CuePoint`, `Wav_InstrumentChunk`, `Wav_InfoTags`).
+  - `AudioDecoder_Picture.cs` — `AudioDecoder_PictureType` (0–20, the numbering ID3 APIC and FLAC PICTURE share), `AudioDecoder_PictureInfo`, `AudioDecoder_PictureCallback(in info, ReadOnlySpan<byte>)`: pictures travel by callback, never by retention.
+  - `Internal/PeekableStream.cs` — bounded look-ahead + replay over any stream (why non-seekable sources work); `Internal/BitReader.cs` (LE/BE header reads); `Internal/MpegFrameHeader.cs` (full MPEG header parser, `MpegFrameHeader_*` enums); `Internal/MpegXingHeader.cs` (Xing/Info/LAME/VBRI); `Internal/G711.cs` (A-law/µ-law → Int16 tables).
+  - `Wav/` — `Wav_Decoder.cs` (tolerant chunk walk: RIFF size 0/0xFFFFFFFF/oversize, odd chunk without pad byte, clamped `data` + `EndedEarly`, `fmt` after `data` when seekable, lazy trailing chunks on forward-only streams; three layouts `Wav_ContainerLayout { Riff, Rf64, Wave64 }` with `ds64`/GUID headers; G.711 expansion to Int16),
+    `Wav_FormatChunk.cs` (`Wav_FormatTag`, EXTENSIBLE → `EffectiveTag`), `Wav_ChunkId.cs` (`Wav_ChunkId` FourCC + W64 GUID tails, `Wav_ChunkInfo`, `Wav_DataSize64Chunk`), `Wav_Metadata.cs` (`Wav_SamplerChunk`, `Wav_SampleLoop`, `Wav_CuePoint`, `Wav_InstrumentChunk`, `Wav_InfoTags`).
   - `Flac/` — `Flac_ReferenceDecoder.cs` (subsumed SimpleFlac bitstream decoder, `internal`, `// AN:` adaptations: buffered re-seatable bit reader, metadata parsing, CRC-8 check, span output), `LICENSE-SimpleFlac.txt` (packed),
     `Flac_Decoder.cs` (`IAudioDecoder`; `NativeFormat = Int32` low-justified; MD5 verify option; seek via SEEKTABLE or CRC-8-validated frame-header binary search), `Flac_MetadataTypes.cs` (`Flac_StreamInfo`, `Flac_Tags`, `Flac_SeekTable`, `Flac_DecoderOptions`, …).
-  - `Mp3/` — Phase 3 (not started): `Mp3_Decoder` wrapping NLayer 3.0.0 (NLayer types in NO public signature), `Mp3_Id3v2`, `Mp3_Id3Tags`.
+  - `Mp3/` — Phase 3. **NLayer 3.0.0 is the frame decoder only (`MpegFrameDecoder`); the framing is ours** (IMPL A13 explains why `MpegFile` was abandoned: one-frame seek re-prime that silently swallows reservoir-starved frames, gapless only for `LAME…` strings, raw/trimmed position flip).
+    `Mp3_FrameReader.cs` (`Mp3_Frame : IMpegFrame` reused per frame; sync/resync with second-header confirmation, ID3 tags anywhere skipped, header-only mode for the seek index, `EndedShort`),
+    `Mp3_Decoder.cs` (`NativeFormat = Float32`; gapless trim with the LAME/ffmpeg rule delay+529 / padding−529 so the output is time-aligned and exactly the source length; frame-offset index + pre-roll seek bit-identical to linear; `TotalFrames` from Xing/VBRI or a header scan when seekable; `CorruptFrames`; `Mp3_DecoderOptions { OnPicture, ReadId3v1 }`),
+    `Mp3_Id3v2.cs` (ID3v2.2/2.3/2.4 + ID3v1 → `Mp3_Id3Tags`; APIC/PIC to the callback or skipped, `PictureCount` always), `Mp3_StreamInfo.cs` (`Mp3_StreamInfo`, `Mp3_GaplessInfo`, `Mp3_MpegVersion/Layer/ChannelMode`).
 
 **Tests:**
 - `tests/AN.Audio.Common.Tests/` — `AudioFormatTests.cs`, `AudioSampleConvertTests.cs` (exact round-trips, saturation, Int24 sign extension, UInt8 bias).
 - `tests/AN.Audio.Tests/` — `SincResamplerTests.cs`, `SincResamplerDiagnosticTests.cs`.
 - `tests/AN.Audio.Midi.Tests/` — message decode theory, ring (incl. two-thread + zero-alloc), SysEx/identity, `WinMm_InteropLayoutTests` (struct sizes vs SDK).
-- `tests/AN.Audio.Formats.Tests/` — `SniffTests`, `PeekableStreamTests`, `WavDecoderTests` (every case seekable AND through `Support/ForwardOnlyStream` with 1–97-byte reads),
-  `FlacDecoderTests` (bit-exact vs WAV master, MD5, tags, truncation, seek), `LocalFileTests` (`Category=Local`: `clap-808.wav`, Salamander `A0v3.flac`).
-  `Support/Wav_TestWriter.cs` synthesises every WAV shape in memory; `Support/FlacFixtureTools.cs` splices SEEKTABLEs / zeroes totals; `Fixtures/` holds ffmpeg-rendered FLAC/WAV pairs + `README.md` provenance.
+- `tests/AN.Audio.Formats.Tests/` — `SniffTests`, `PeekableStreamTests`, `WavDecoderTests` (every case seekable AND through `Support/ForwardOnlyStream` with 1–97-byte reads), `WavG711Tests`, `WavRf64W64Tests`,
+  `FlacDecoderTests` (bit-exact vs WAV master, MD5, tags, truncation, seek), `Mp3DecoderTests` (exact length vs master, time alignment, tags, picture callback, seek == linear, D13), `LocalFileTests` (`Category=Local`: `clap-808.wav`, Salamander `A0v3.flac`).
+  `Support/Wav_TestWriter.cs` synthesises every WAV shape in memory (RIFF, RF64/BW64, Wave64); `Support/Mp3_TestTagWriter.cs` synthesises ID3v2 tags; `Support/FlacFixtureTools.cs` splices SEEKTABLEs / zeroes totals; `Fixtures/` holds ffmpeg-rendered FLAC/MP3/WAV + `README.md` provenance.
 - `tests/SimpleAudioTest/`, `tests/SimpleMidiTest/` — manual console smoke tests against real hardware.
 
 ## Dependency policy — managed only, no unsafe code paths
@@ -188,13 +192,13 @@ DLL/nupkg in a publish agrees. Consumers pin `ANAudioVersion` in their own build
 Definition of done per spec phase: `dotnet build` clean, `dotnet test` green for ALL test projects, `publish-local` succeeds, spec
 checkbox ticked, commit (multi-line messages via here-string piped to `git commit -F -`; `git mv` for tracked files).
 
-## Status snapshot (2026-09-09)
+## Status snapshot (2026-09-09, after spec 50 Phases 3 / 4a / 4c)
 
 | Area | State |
 |---|---|
 | PCM output | ✅ Windows WASAPI, ✅ macOS AudioQueue, ✅ Linux ALSA |
 | Output device mgmt | ✅ all three |
 | MIDI input | ✅ Windows WinMM (hardware-validated); macOS/Linux planned |
-| Formats | ✅ WAV (Phase 1), ✅ FLAC incl. seeking (Phase 2), ◻ MP3 (Phase 3, NLayer 3.0.0), ◻ AIFF/RF64/A-law/Ogg (Phase 4) |
+| Formats | ✅ WAV incl. A-law/µ-law, RF64/BW64, Wave64 (Phases 1, 4a, 4c), ✅ FLAC incl. seeking (Phase 2), ✅ MP3 with exact seek + picture callback (Phase 3, NLayer 3.0.0 as frame decoder only), ◻ AIFF / Ogg (Phase 4) |
 | Capture / MIDI output | ◻ planned, interfaces shaped |
-| Tests | 250 (Common 21, Audio 8, Midi 111, Formats 110) |
+| Tests | 301 (Common 21, Audio 8, Midi 111, Formats 161) |
