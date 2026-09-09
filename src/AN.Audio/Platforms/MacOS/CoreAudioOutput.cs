@@ -56,6 +56,14 @@ internal sealed unsafe class CoreAudioOutput : IAudioOutput
     public AudioFormat Format => _consumerFormat;
     public AudioFormat DeviceFormat => _actualFormat;
     public double LatencyMs => _latencyMs;
+    // Spec 60 D4/D7 — Phase C (AUHAL) will make these real; AudioQueue reports what it has. LowLatency is not available on this backend yet.
+    public int PeriodFrames => _framesPerBuffer;
+    public AudioOutput_LatencyMode LatencyModeActual => AudioOutput_LatencyMode.Default;
+    public AudioOutput_StreamProcessing StreamProcessingActual => AudioOutput_StreamProcessing.SystemEffects;
+    public AudioOutput_LatencyFallbackReason LatencyFallbackReason => _lowLatencyRequested ? AudioOutput_LatencyFallbackReason.DriverRefused : AudioOutput_LatencyFallbackReason.None;
+    /// <summary>AudioQueue exposes no overload notification; stays 0 until Phase C.</summary>
+    public long UnderrunCount => 0;
+    private readonly bool _lowLatencyRequested;
 
     public AudioSwitchPolicy SwitchPolicy
     {
@@ -91,6 +99,7 @@ internal sealed unsafe class CoreAudioOutput : IAudioOutput
         _bufferSizeMs = options?.BufferSizeMs ?? 20;
         _switchPolicy = options?.SwitchPolicy ?? AudioSwitchPolicy.FollowDefault;
         _preferredDevices = options?.PreferredDevices;
+        _lowLatencyRequested = options?.Latency == AudioOutput_LatencyMode.LowLatency;
 
         _deviceManager = CoreAudioDeviceManager.Instance;
 

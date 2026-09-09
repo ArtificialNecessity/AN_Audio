@@ -44,6 +44,23 @@ public interface IAudioOutput : IDisposable
     /// </summary>
     double LatencyMs { get; }
 
+    // ── Spec 60: what the OS actually scheduled ──────────────────────────────────────────────────
+
+    /// <summary>Frames per callback the OS actually scheduled (the period). May change after <see cref="DeviceSwitched"/>.</summary>
+    int PeriodFrames { get; }
+
+    /// <summary>The latency mode in effect \u2014 the requested one, or <see cref="AudioOutput_LatencyMode.Default"/> after a fallback (spec 60 D3).</summary>
+    AudioOutput_LatencyMode LatencyModeActual { get; }
+
+    /// <summary>The processing mode in effect (RAW may be refused by the endpoint).</summary>
+    AudioOutput_StreamProcessing StreamProcessingActual { get; }
+
+    /// <summary>Why the actual mode differs from the requested one; <see cref="AudioOutput_LatencyFallbackReason.None"/> when it does not.</summary>
+    AudioOutput_LatencyFallbackReason LatencyFallbackReason { get; }
+
+    /// <summary>Glitches the OS reported since <see cref="Start"/> (spec 60 D7). Small periods without this number are a trap.</summary>
+    long UnderrunCount { get; }
+
     // ── Device Management ──────────────────────────────────────────────
 
     /// <summary>

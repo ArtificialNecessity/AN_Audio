@@ -18,6 +18,7 @@ internal static unsafe class WasapiInterop
 
     public const uint CLSCTX_ALL = 0x17;
     public const int AUDCLNT_SHAREMODE_SHARED = 0;
+    public const int AUDCLNT_SHAREMODE_EXCLUSIVE = 1;
     public const uint AUDCLNT_STREAMFLAGS_EVENTCALLBACK = 0x00040000;
     public const int eRender = 0;
     public const int eConsole = 0;
@@ -201,6 +202,25 @@ internal static unsafe class WasapiInterop
             return fn(client, p);
     }
 
+    // IAudioClient::GetDevicePeriod — REFERENCE_TIME (100 ns): default engine period and minimum (exclusive-mode) period
+    public static int AudioClientGetDevicePeriod(nint client, out long defaultPeriod, out long minimumPeriod)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, long*, long*, int>)
+            GetVtableMethod(client, IAudioClient_GetDevicePeriod);
+        fixed (long* pDefault = &defaultPeriod)
+        fixed (long* pMin = &minimumPeriod)
+            return fn(client, pDefault, pMin);
+    }
+
+    // IAudioClient::IsFormatSupported — S_OK exact; S_FALSE (1) + closest match (shared only; CoTaskMemFree it); AUDCLNT_E_UNSUPPORTED_FORMAT otherwise
+    public static int AudioClientIsFormatSupported(nint client, int shareMode, WAVEFORMATEX* format, out WAVEFORMATEX* closestMatch)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, int, WAVEFORMATEX*, WAVEFORMATEX**, int>)
+            GetVtableMethod(client, IAudioClient_IsFormatSupported);
+        fixed (WAVEFORMATEX** p = &closestMatch)
+            return fn(client, shareMode, format, p);
+    }
+
     // IAudioClient::Start
     public static int AudioClientStart(nint client)
     {
@@ -258,6 +278,87 @@ internal static unsafe class WasapiInterop
         var fn = (delegate* unmanaged[Stdcall]<nint, uint, uint, int>)
             GetVtableMethod(renderClient, IAudioRenderClient_ReleaseBuffer);
         return fn(renderClient, numFramesWritten, flags);
+    }
+
+    // ─── IAudioClient2 / IAudioClient3 (spec 60) ───────────────────────────────────────────────────
+    // Vtable indices and signatures from audioclient.h — _EXTERNAL_APIS/WASAPI_IAudioClient3_MMCSS.md.
+
+    public static readonly Guid IID_IAudioClient2 = new("726778CD-F60A-4EDA-82DE-E47610CD78AA");
+    public static readonly Guid IID_IAudioClient3 = new("7ED4EE07-8E67-4CD4-8C1A-2B7A5987AD42");
+
+    public const int IAudioClient2_IsOffloadCapable = 15;
+    public const int IAudioClient2_SetClientProperties = 16;
+    public const int IAudioClient2_GetBufferSizeLimits = 17;
+    public const int IAudioClient3_GetSharedModeEnginePeriod = 18;
+    public const int IAudioClient3_GetCurrentSharedModeEnginePeriod = 19;
+    public const int IAudioClient3_InitializeSharedAudioStream = 20;
+
+    /// <summary><c>AudioClientProperties</c> for <c>IAudioClient2::SetClientProperties</c>. Call BEFORE Initialize/GetMixFormat.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AudioClientProperties
+    {
+        public uint cbSize;
+        public int bIsOffload;          // BOOL
+        public int eCategory;           // AUDIO_STREAM_CATEGORY
+        public uint Options;            // AUDCLNT_STREAMOPTIONS
+    }
+    public const int AudioCategory_Other = 0;
+    public const uint AUDCLNT_STREAMOPTIONS_NONE = 0x0;
+    public const uint AUDCLNT_STREAMOPTIONS_RAW = 0x1;
+    public const uint AUDCLNT_STREAMOPTIONS_MATCH_FORMAT = 0x2;
+
+    /// <summary><c>AUDCLNT_ERR(n) = MAKE_HRESULT(SEVERITY_ERROR, FACILITY_AUDCLNT 0x889, n)</c>.</summary>
+    public enum AudioClientHResult : uint
+    {
+        E_NOINTERFACE = 0x80004002,
+        AUDCLNT_E_UNSUPPORTED_FORMAT = 0x88890008,
+        AUDCLNT_E_DEVICE_IN_USE = 0x8889000A,
+        AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED = 0x8889000E,
+        AUDCLNT_E_BUFDURATION_PERIOD_NOT_EQUAL = 0x88890013,
+        AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED = 0x88890019,
+        AUDCLNT_E_INVALID_DEVICE_PERIOD = 0x88890020,
+        AUDCLNT_E_RAW_MODE_UNSUPPORTED = 0x88890027,
+        AUDCLNT_E_ENGINE_PERIODICITY_LOCKED = 0x88890028,
+        AUDCLNT_E_ENGINE_FORMAT_LOCKED = 0x88890029,
+    }
+
+    // IAudioClient2::SetClientProperties
+    public static int AudioClientSetClientProperties(nint client, ref AudioClientProperties properties)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, AudioClientProperties*, int>)
+            GetVtableMethod(client, IAudioClient2_SetClientProperties);
+        fixed (AudioClientProperties* p = &properties)
+            return fn(client, p);
+    }
+
+    // IAudioClient3::GetSharedModeEnginePeriod — all counts in FRAMES
+    public static int AudioClientGetSharedModeEnginePeriod(nint client, WAVEFORMATEX* format, out uint defaultPeriod, out uint fundamentalPeriod, out uint minPeriod, out uint maxPeriod)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, WAVEFORMATEX*, uint*, uint*, uint*, uint*, int>)
+            GetVtableMethod(client, IAudioClient3_GetSharedModeEnginePeriod);
+        fixed (uint* pDefault = &defaultPeriod)
+        fixed (uint* pFundamental = &fundamentalPeriod)
+        fixed (uint* pMin = &minPeriod)
+        fixed (uint* pMax = &maxPeriod)
+            return fn(client, format, pDefault, pFundamental, pMin, pMax);
+    }
+
+    // IAudioClient3::GetCurrentSharedModeEnginePeriod — caller CoTaskMemFree's the returned format
+    public static int AudioClientGetCurrentSharedModeEnginePeriod(nint client, out WAVEFORMATEX* format, out uint currentPeriod)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, WAVEFORMATEX**, uint*, int>)
+            GetVtableMethod(client, IAudioClient3_GetCurrentSharedModeEnginePeriod);
+        fixed (WAVEFORMATEX** pFormat = &format)
+        fixed (uint* pPeriod = &currentPeriod)
+            return fn(client, pFormat, pPeriod);
+    }
+
+    // IAudioClient3::InitializeSharedAudioStream — no buffer-size argument; the buffer follows the period
+    public static int AudioClientInitializeSharedAudioStream(nint client, uint streamFlags, uint periodInFrames, WAVEFORMATEX* format, nint sessionGuid)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<nint, uint, uint, WAVEFORMATEX*, nint, int>)
+            GetVtableMethod(client, IAudioClient3_InitializeSharedAudioStream);
+        return fn(client, streamFlags, periodInFrames, format, sessionGuid);
     }
 
     // ─── Device Management COM Wrappers ──────────────────────────────────────────
@@ -394,6 +495,17 @@ internal static unsafe class WasapiInterop
 
     [DllImport("kernel32.dll")]
     public static extern int CloseHandle(nint hObject);
+
+    // ─── MMCSS (avrt.dll) — spec 60 D5. See _EXTERNAL_APIS/WASAPI_IAudioClient3_MMCSS.md ─────────────
+
+    /// <summary>Registers the calling thread with the Multimedia Class Scheduler ("Pro Audio" = real-time class). NULL on failure.</summary>
+    [DllImport("avrt.dll", CharSet = CharSet.Unicode)]
+    public static extern nint AvSetMmThreadCharacteristicsW(string taskName, ref uint taskIndex);
+
+    [DllImport("avrt.dll")]
+    public static extern int AvRevertMmThreadCharacteristics(nint avrtHandle);
+
+    public const string MMCSS_TASK_PRO_AUDIO = "Pro Audio";
 
     public const uint INFINITE = 0xFFFFFFFF;
     public const uint WAIT_OBJECT_0 = 0;

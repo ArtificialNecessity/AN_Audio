@@ -58,6 +58,14 @@ internal sealed unsafe class AlsaAudioOutput : IAudioOutput
     public AudioFormat Format => _consumerFormat;
     public AudioFormat DeviceFormat => _deviceFormat;
     public double LatencyMs => _latencyMs;
+    // Spec 60 D4/D7 — Phase B (explicit hw_params + SCHED_FIFO) will honour LowLatency; today the period is whatever snd_pcm_set_params chose.
+    public int PeriodFrames => (int)_periodSize;
+    public AudioOutput_LatencyMode LatencyModeActual => AudioOutput_LatencyMode.Default;
+    public AudioOutput_StreamProcessing StreamProcessingActual => AudioOutput_StreamProcessing.SystemEffects;
+    public AudioOutput_LatencyFallbackReason LatencyFallbackReason => _lowLatencyRequested ? AudioOutput_LatencyFallbackReason.DriverRefused : AudioOutput_LatencyFallbackReason.None;
+    public long UnderrunCount => Interlocked.Read(ref _underrunCount);
+    private readonly bool _lowLatencyRequested;
+    private long _underrunCount;
 
     public AudioSwitchPolicy SwitchPolicy
     {
@@ -91,6 +99,7 @@ internal sealed unsafe class AlsaAudioOutput : IAudioOutput
         _bufferSizeMs = options?.BufferSizeMs ?? 20;
         _switchPolicy = options?.SwitchPolicy ?? AudioSwitchPolicy.FollowDefault;
         _preferredDevices = options?.PreferredDevices;
+        _lowLatencyRequested = options?.Latency == AudioOutput_LatencyMode.LowLatency;
 
         _deviceManager = AlsaDeviceManager.Instance;
 
@@ -600,6 +609,7 @@ internal sealed unsafe class AlsaAudioOutput : IAudioOutput
     /// </summary>
     private void RecoverUnderrun()
     {
+        Interlocked.Increment(ref _underrunCount); // spec 60 D7
         int err = snd_pcm_prepare(_pcm);
         if (err < 0)
         {

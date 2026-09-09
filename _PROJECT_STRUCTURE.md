@@ -153,11 +153,12 @@ Numbered by feature area; a `*_IMPL.md` beside a design spec is its build checkl
 - `30_MidiInput.md` — MIDI input: WinMM backend, MIDI 2.0-ready message contract (D25), growable ring (D23), packaging D27.
 - `50_Audio_Formats.md` — **Key spec for decoding:** D1–D16, `AN.Audio.Common` (D15), zero-copy (D16), §WAV, §FLAC, §MP3, dependency audit, phases.
 - `50_Audio_Formats_IMPL.md` — the Phase 0–4 checklist, "As built" deviation table A1–A11, handoff notes (e.g. `clap-808.wav` is 24-bit mono).
+- `60_Low_Latency_Output.md` — **DRAFT.** `AudioOutputOptions.Latency = LowLatency` on all three platforms: Windows `IAudioClient3::InitializeSharedAudioStream` at the engine minimum period + MMCSS "Pro Audio" (Phase A, in progress); Linux explicit `hw_params` period + `SCHED_FIFO` (+ rtkit later); macOS AUHAL render callback replacing AudioQueue; new `IAudioOutput.PeriodFrames / LatencyModeActual / LatencyFallbackReason / UnderrunCount`. Driven by MusicStudio's measured key→sound budget (its spec Bringup/18).
 
 ## External API notes: _EXTERNAL_APIS/
 
 One file per API, quoting the header/source actually read, with the version/commit: `WinMM_MidiIn.md`, `UMP_MIDI2_Format.md`,
-`WaveFormatExtensible_ChannelMask.md` (`SPEAKER_*`, `KSDATAFORMAT_SUBTYPE_*`), `SimpleFlac_FlacDecoder.md`, `NLayer_MpegFile.md`.
+`WaveFormatExtensible_ChannelMask.md` (`SPEAKER_*`, `KSDATAFORMAT_SUBTYPE_*`), `SimpleFlac_FlacDecoder.md`, `NLayer_MpegFile.md`, `WASAPI_IAudioClient3_MMCSS.md` (IAudioClient2/3 vtable, IIDs, `AUDCLNT_E_*`, `avrt.dll`).
 Rule 2 of the overview: read the SDK header, not the blog post.
 
 ## Architecture Patterns

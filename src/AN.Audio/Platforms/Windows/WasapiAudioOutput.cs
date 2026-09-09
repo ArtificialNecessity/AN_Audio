@@ -42,6 +42,21 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
 
     // Latency
     private double _latencyMs;
+    // Spec 60: requested vs actual scheduling
+    private readonly AudioOutput_LatencyMode _latencyRequested;
+    private readonly AudioOutput_StreamProcessing _processingRequested;
+    private AudioOutput_LatencyMode _latencyActual;
+    private AudioOutput_StreamProcessing _processingActual;
+    private AudioOutput_LatencyFallbackReason _fallbackReason;
+    private int _periodFrames;
+    private long _underrunCount;
+    private bool _firstFillDone;
+    /// <summary>Which IAudioClient generation Activate gave us: 1, 2 or 3.</summary>
+    private int _audioClientVersion;
+    /// <summary>Exclusive mode in effect: the buffer IS the period and is written whole every event; padding-based underrun detection does not apply.</summary>
+    private bool _exclusive;
+    /// <summary>The format the exclusive stream was initialised with (storage for the pointer the parser/converter read).</summary>
+    private WAVEFORMATEXTENSIBLE _exclusiveFormat;
 
     private bool _disposed;
 
@@ -50,6 +65,11 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
     public AudioFormat Format => _consumerFormat;
     public AudioFormat DeviceFormat => _deviceFormat;
     public double LatencyMs => _latencyMs;
+    public int PeriodFrames => _periodFrames;
+    public AudioOutput_LatencyMode LatencyModeActual => _latencyActual;
+    public AudioOutput_StreamProcessing StreamProcessingActual => _processingActual;
+    public AudioOutput_LatencyFallbackReason LatencyFallbackReason => _fallbackReason;
+    public long UnderrunCount => Interlocked.Read(ref _underrunCount);
 
     public AudioSwitchPolicy SwitchPolicy
     {
@@ -83,6 +103,8 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
         _bufferSizeMs = options?.BufferSizeMs ?? 20;
         _switchPolicy = options?.SwitchPolicy ?? AudioSwitchPolicy.FollowDefault;
         _preferredDevices = options?.PreferredDevices;
+        _latencyRequested = options?.Latency ?? AudioOutput_LatencyMode.Default;
+        _processingRequested = options?.Processing ?? AudioOutput_StreamProcessing.SystemEffects;
 
         _deviceManager = WasapiDeviceManager.Instance;
 
@@ -181,10 +203,38 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
             }
         }
 
-        // Activate IAudioClient
-        Guid audioClientIid = IID_IAudioClient;
-        hr = DeviceActivate(_device, ref audioClientIid, CLSCTX_ALL, 0, out _audioClient);
-        Marshal.ThrowExceptionForHR(hr);
+        // Spec 60: the newest IAudioClient generation the OS offers. IAudioClient3 (Win10 1607+) carries the low-latency shared path,
+        // IAudioClient2 (Win8+) carries SetClientProperties (RAW). The object is the same; only the vtable length differs.
+        _fallbackReason = AudioOutput_LatencyFallbackReason.None;
+        _latencyActual = _latencyRequested;
+        _processingActual = _processingRequested;
+        _audioClientVersion = ActivateNewestAudioClient(out _audioClient);
+        if (_latencyRequested == AudioOutput_LatencyMode.LowLatency && _audioClientVersion < 3)
+        {
+            _latencyActual = AudioOutput_LatencyMode.Default;
+            _fallbackReason = AudioOutput_LatencyFallbackReason.OsTooOld;
+        }
+
+        // RAW processing (bypass the endpoint's APO chain) must be declared BEFORE GetMixFormat/Initialize (the mix format may differ in raw mode).
+        if (_processingRequested == AudioOutput_StreamProcessing.Raw)
+        {
+            if (_audioClientVersion >= 2)
+            {
+                var props = new AudioClientProperties { cbSize = (uint)sizeof(AudioClientProperties), bIsOffload = 0, eCategory = AudioCategory_Other, Options = AUDCLNT_STREAMOPTIONS_RAW };
+                int rawHr = AudioClientSetClientProperties(_audioClient, ref props);
+                if (rawHr < 0)
+                {
+                    // AUDCLNT_E_RAW_MODE_UNSUPPORTED or anything else: the stream still works, with system effects.
+                    _processingActual = AudioOutput_StreamProcessing.SystemEffects;
+                    if (_fallbackReason == AudioOutput_LatencyFallbackReason.None) _fallbackReason = AudioOutput_LatencyFallbackReason.RawModeUnsupported;
+                }
+            }
+            else
+            {
+                _processingActual = AudioOutput_StreamProcessing.SystemEffects;
+                if (_fallbackReason == AudioOutput_LatencyFallbackReason.None) _fallbackReason = AudioOutput_LatencyFallbackReason.OsTooOld;
+            }
+        }
 
         // Get the endpoint's mix format
         WAVEFORMATEX* mixFormat;
@@ -201,18 +251,43 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
         else
             _converter.UpdateDeviceFormat(_deviceFormat);
 
-        // Calculate buffer duration
-        long hnsBufferDuration = (long)_bufferSizeMs * REFTIMES_PER_MS;
-
-        // Initialize audio client: shared mode, event-driven
-        hr = AudioClientInitialize(
-            _audioClient,
-            AUDCLNT_SHAREMODE_SHARED,
-            AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-            hnsBufferDuration,
-            0,
-            mixFormat,
-            0);
+        // ── Initialise: low-latency shared stream when asked for and available, else the classic buffered path ──
+        uint lowLatencyPeriodFrames = 0;
+        _exclusive = false;
+        if (_latencyActual == AudioOutput_LatencyMode.Exclusive)
+        {
+            hr = InitializeExclusive(mixFormat, out lowLatencyPeriodFrames);
+            if (hr >= 0)
+            {
+                _exclusive = true;
+                _processingActual = AudioOutput_StreamProcessing.Raw; // exclusive streams bypass the endpoint effects chain by construction
+                fixed (WAVEFORMATEXTENSIBLE* pExclusive = &_exclusiveFormat) { _deviceFormat = ParseWaveFormat((WAVEFORMATEX*)pExclusive); }
+                _deviceFrameBytes = _deviceFormat.BytesPerFrame;
+                _converter.UpdateDeviceFormat(_deviceFormat);
+            }
+            else
+            {
+                // Endpoint busy, exclusive disabled in Sound settings, or no exclusive-capable Int16/Float32 format: shared it is.
+                _latencyActual = _audioClientVersion >= 3 ? AudioOutput_LatencyMode.LowLatency : AudioOutput_LatencyMode.Default;
+                _fallbackReason = AudioOutput_LatencyFallbackReason.ExclusiveRefused;
+            }
+        }
+        if (_latencyActual == AudioOutput_LatencyMode.LowLatency)
+        {
+            hr = InitializeLowLatency(mixFormat, out lowLatencyPeriodFrames);
+            if (hr < 0)
+            {
+                // The engine/driver refused the small period: fall back to the classic path on the same client (Initialize is still legal —
+                // a failed InitializeSharedAudioStream leaves the client uninitialised).
+                _latencyActual = AudioOutput_LatencyMode.Default;
+                _fallbackReason = AudioOutput_LatencyFallbackReason.DriverRefused;
+            }
+        }
+        if (_latencyActual == AudioOutput_LatencyMode.Default)
+        {
+            long hnsBufferDuration = (long)_bufferSizeMs * REFTIMES_PER_MS;
+            hr = AudioClientInitialize(_audioClient, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, hnsBufferDuration, 0, mixFormat, 0);
+        }
 
         CoTaskMemFree((nint)mixFormat);
         Marshal.ThrowExceptionForHR(hr);
@@ -228,6 +303,16 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
         hr = AudioClientGetBufferSize(_audioClient, out _bufferFrameCount);
         Marshal.ThrowExceptionForHR(hr);
 
+        // Period actually in effect (D4): the frames per wake. Low latency = what we initialised with; default = the engine's default period.
+        if (lowLatencyPeriodFrames > 0) _periodFrames = (int)lowLatencyPeriodFrames;
+        else
+        {
+            _periodFrames = AudioClientGetDevicePeriod(_audioClient, out long hnsDefaultPeriod, out _) >= 0
+                ? (int)Math.Max(1, Math.Round(hnsDefaultPeriod * (double)_deviceFormat.SampleRate / (REFTIMES_PER_MS * 1000.0)))
+                : (int)_bufferFrameCount;
+        }
+        _firstFillDone = false;
+
         // Get latency
         long hnsLatency;
         hr = AudioClientGetStreamLatency(_audioClient, out hnsLatency);
@@ -240,6 +325,125 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
 
         // Update current device info
         _currentDevice = _deviceManager.GetDeviceById(deviceId ?? _deviceManager.GetDefaultDeviceId() ?? "");
+    }
+
+    /// <summary>Activate IAudioClient3, then 2, then 1. Returns the generation obtained (3/2/1); throws only if even IAudioClient fails.</summary>
+    private int ActivateNewestAudioClient(out nint client)
+    {
+        Guid iid3 = IID_IAudioClient3;
+        if (DeviceActivate(_device, ref iid3, CLSCTX_ALL, 0, out client) >= 0 && client != 0) return 3;
+        Guid iid2 = IID_IAudioClient2;
+        if (DeviceActivate(_device, ref iid2, CLSCTX_ALL, 0, out client) >= 0 && client != 0) return 2;
+        Guid iid1 = IID_IAudioClient;
+        Marshal.ThrowExceptionForHR(DeviceActivate(_device, ref iid1, CLSCTX_ALL, 0, out client));
+        return 1;
+    }
+
+    /// <summary>Release the current IAudioClient and Activate a fresh one (same generation), re-applying RAW if it was granted. Required after a
+    /// failed <c>Initialize</c> in exclusive mode (<c>AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED</c> documents this; other failures leave the object unusable too).</summary>
+    private void ReactivateClient()
+    {
+        if (_audioClient != 0) { Release(_audioClient); _audioClient = 0; }
+        _audioClientVersion = ActivateNewestAudioClient(out _audioClient);
+        if (_processingActual == AudioOutput_StreamProcessing.Raw && _audioClientVersion >= 2)
+        {
+            var props = new AudioClientProperties { cbSize = (uint)sizeof(AudioClientProperties), bIsOffload = 0, eCategory = AudioCategory_Other, Options = AUDCLNT_STREAMOPTIONS_RAW };
+            AudioClientSetClientProperties(_audioClient, ref props);
+        }
+    }
+
+    /// <summary>Spec 60 §4 (Exclusive): event-driven exclusive stream at the driver's MINIMUM device period. Tries the endpoint's mix format, then
+    /// Int16/Float32 WAVEFORMATEXTENSIBLE, then plain PCM16 (the formats <see cref="AudioFormatConverter"/> can produce). Handles
+    /// <c>AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED</c> by re-initialising at the driver's aligned buffer size. On success <see cref="_exclusiveFormat"/>
+    /// holds the format in use and <paramref name="periodFrames"/> the buffer (= period) length. On failure the client has been re-activated and
+    /// is ready for a shared-mode Initialize.</summary>
+    private int InitializeExclusive(WAVEFORMATEX* mixFormat, out uint periodFrames)
+    {
+        periodFrames = 0;
+        int hr = AudioClientGetDevicePeriod(_audioClient, out _, out long hnsMinPeriod);
+        if (hr < 0) return hr;
+        bool trace = Environment.GetEnvironmentVariable("AN_AUDIO_TRACE") == "1";
+
+        // Candidate formats in preference order. All share the endpoint's rate and channel count.
+        uint rate = mixFormat->nSamplesPerSec; ushort channels = mixFormat->nChannels;
+        uint channelMask = mixFormat->wFormatTag == WAVE_FORMAT_EXTENSIBLE ? ((WAVEFORMATEXTENSIBLE*)mixFormat)->dwChannelMask : (channels == 1 ? 0x4u : 0x3u);
+        WAVEFORMATEXTENSIBLE* candidates = stackalloc WAVEFORMATEXTENSIBLE[4];
+        int candidateCount = 0;
+        // 0: the mix format itself (copied; it may be a plain WAVEFORMATEX, which is fine — cbSize decides what the driver reads)
+        candidates[candidateCount++] = mixFormat->wFormatTag == WAVE_FORMAT_EXTENSIBLE ? *(WAVEFORMATEXTENSIBLE*)mixFormat : new WAVEFORMATEXTENSIBLE { Format = *mixFormat };
+        candidates[candidateCount++] = MakeExtensible(rate, channels, 16, channelMask, KSDATAFORMAT_SUBTYPE_PCM);
+        candidates[candidateCount++] = MakeExtensible(rate, channels, 32, channelMask, KSDATAFORMAT_SUBTYPE_IEEE_FLOAT);
+        candidates[candidateCount++] = new WAVEFORMATEXTENSIBLE { Format = new WAVEFORMATEX { wFormatTag = WAVE_FORMAT_PCM, nChannels = channels, nSamplesPerSec = rate, wBitsPerSample = 16, nBlockAlign = (ushort)(2 * channels), nAvgBytesPerSec = rate * 2u * channels, cbSize = 0 } };
+
+        int chosen = -1;
+        for (int i = 0; i < candidateCount && chosen < 0; i++)
+        {
+            // Only formats the converter can render into: 16-bit PCM or 32-bit float.
+            var probe = ParseWaveFormat((WAVEFORMATEX*)&candidates[i]);
+            bool renderable = (probe.Format == SampleFormat.Int16 && candidates[i].Format.wBitsPerSample == 16) || (probe.Format == SampleFormat.Float32 && candidates[i].Format.wBitsPerSample == 32);
+            if (!renderable) continue;
+            hr = AudioClientIsFormatSupported(_audioClient, AUDCLNT_SHAREMODE_EXCLUSIVE, (WAVEFORMATEX*)&candidates[i], out WAVEFORMATEX* closest);
+            if (closest != null) CoTaskMemFree((nint)closest);
+            if (trace) Console.Error.WriteLine($"[AN.Audio] exclusive IsFormatSupported[{i}] tag=0x{candidates[i].Format.wFormatTag:X} bits={candidates[i].Format.wBitsPerSample} -> 0x{hr:X8}");
+            if (hr == 0) chosen = i;
+        }
+        if (chosen < 0) return unchecked((int)AudioClientHResult.AUDCLNT_E_UNSUPPORTED_FORMAT);
+        _exclusiveFormat = candidates[chosen];
+
+        fixed (WAVEFORMATEXTENSIBLE* pFormat = &_exclusiveFormat)
+        {
+            hr = AudioClientInitialize(_audioClient, AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, hnsMinPeriod, hnsMinPeriod, (WAVEFORMATEX*)pFormat, 0);
+            if (trace) Console.Error.WriteLine($"[AN.Audio] exclusive Initialize minPeriod={hnsMinPeriod / 10000.0:F3} ms -> 0x{hr:X8}");
+            if ((uint)hr == (uint)AudioClientHResult.AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED)
+            {
+                // The driver wants a buffer that is a whole number of its own frames; it tells us the size, we re-init with the matching duration.
+                if (AudioClientGetBufferSize(_audioClient, out uint alignedFrames) >= 0 && alignedFrames > 0)
+                {
+                    long hnsAligned = (long)Math.Round(10_000_000.0 * alignedFrames / rate);
+                    ReactivateClient();
+                    hr = AudioClientInitialize(_audioClient, AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, hnsAligned, hnsAligned, (WAVEFORMATEX*)pFormat, 0);
+                    if (trace) Console.Error.WriteLine($"[AN.Audio] exclusive Initialize aligned {alignedFrames} frames = {hnsAligned / 10000.0:F3} ms -> 0x{hr:X8}");
+                }
+            }
+        }
+        if (hr < 0) { ReactivateClient(); return hr; }
+        hr = AudioClientGetBufferSize(_audioClient, out uint bufferFrames);
+        if (hr < 0) { ReactivateClient(); return hr; }
+        periodFrames = bufferFrames; // exclusive event-driven: buffer == period, filled whole every event
+        return 0;
+    }
+
+    private static WAVEFORMATEXTENSIBLE MakeExtensible(uint rate, ushort channels, ushort bits, uint channelMask, Guid subFormat)
+    {
+        ushort blockAlign = (ushort)(bits / 8 * channels);
+        return new WAVEFORMATEXTENSIBLE
+        {
+            Format = new WAVEFORMATEX { wFormatTag = WAVE_FORMAT_EXTENSIBLE, nChannels = channels, nSamplesPerSec = rate, wBitsPerSample = bits, nBlockAlign = blockAlign, nAvgBytesPerSec = rate * blockAlign, cbSize = 22 },
+            wValidBitsPerSample = bits, dwChannelMask = channelMask, SubFormat = subFormat,
+        };
+    }
+
+    /// <summary>Spec 60 §4: ask the engine for its supported period range at this format and initialise at the MINIMUM. If another stream has
+    /// already locked the engine to a different small period, adopt that one (informational fallback reason). Returns the HRESULT of the
+    /// initialisation; <paramref name="periodFrames"/> is the period used on success.</summary>
+    private int InitializeLowLatency(WAVEFORMATEX* mixFormat, out uint periodFrames)
+    {
+        periodFrames = 0;
+        int hr = AudioClientGetSharedModeEnginePeriod(_audioClient, mixFormat, out uint defaultPeriod, out uint fundamentalPeriod, out uint minPeriod, out uint maxPeriod);
+        if (Environment.GetEnvironmentVariable("AN_AUDIO_TRACE") == "1")
+            Console.Error.WriteLine($"[AN.Audio] GetSharedModeEnginePeriod hr=0x{hr:X8} default={defaultPeriod} fundamental={fundamentalPeriod} min={minPeriod} max={maxPeriod} frames @ {mixFormat->nSamplesPerSec} Hz");
+        if (hr < 0) return hr;
+        hr = AudioClientInitializeSharedAudioStream(_audioClient, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, minPeriod, mixFormat, 0);
+        if (hr >= 0) { periodFrames = minPeriod; return hr; }
+        if ((uint)hr != (uint)AudioClientHResult.AUDCLNT_E_ENGINE_PERIODICITY_LOCKED) return hr;
+
+        // Engine already running at someone else's period: take it.
+        hr = AudioClientGetCurrentSharedModeEnginePeriod(_audioClient, out WAVEFORMATEX* currentFormat, out uint currentPeriod);
+        if (hr < 0) return hr;
+        CoTaskMemFree((nint)currentFormat);
+        hr = AudioClientInitializeSharedAudioStream(_audioClient, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, currentPeriod, mixFormat, 0);
+        if (hr >= 0) { periodFrames = currentPeriod; _fallbackReason = AudioOutput_LatencyFallbackReason.EnginePeriodLocked; }
+        return hr;
     }
 
     /// <summary>
@@ -301,7 +505,18 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
     private void AudioThreadProc()
     {
         CoInitializeEx(0, COINIT_MULTITHREADED);
+        // Spec 60 D5: register with the Multimedia Class Scheduler as "Pro Audio" (real-time class). Applies in BOTH latency modes — it costs
+        // nothing and removes scheduler jitter. ThreadPriority.Highest (set by Start) remains the fallback if avrt refuses.
+        nint mmcssHandle = 0;
+        try
+        {
+            uint taskIndex = 0;
+            mmcssHandle = AvSetMmThreadCharacteristicsW(MMCSS_TASK_PRO_AUDIO, ref taskIndex);
+        }
+        catch (DllNotFoundException) { mmcssHandle = 0; }
 
+        try
+        {
         while (_running)
         {
             // Snapshot callback early — Stop() may null it at any time
@@ -334,6 +549,8 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
 
             uint framesAvailable = _bufferFrameCount - padding;
             if (framesAvailable == 0) continue;
+            // Spec 60 D7: after the first fill, waking to a COMPLETELY empty buffer means the engine ran dry before we got here.
+            if (!_exclusive && padding == 0 && _firstFillDone) Interlocked.Increment(ref _underrunCount);
 
             // Get the hardware buffer pointer
             byte* dataPtr;
@@ -368,6 +585,12 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
 
             uint flags = (framesWritten == 0) ? AUDCLNT_BUFFERFLAGS_SILENT : 0;
             RenderClientReleaseBuffer(_renderClient, framesAvailable, flags);
+            _firstFillDone = true;
+        }
+        }
+        finally
+        {
+            if (mmcssHandle != 0) { try { AvRevertMmThreadCharacteristics(mmcssHandle); } catch (DllNotFoundException) { } }
         }
     }
 

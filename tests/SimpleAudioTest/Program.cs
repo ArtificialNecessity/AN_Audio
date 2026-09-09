@@ -13,9 +13,12 @@ internal static class Program
 {
     static int Main(string[] args)
     {
-        // Parse args: [wavPath] [--duration <seconds>]
+        // Parse args: [wavPath] [--duration <seconds>] [--low-latency] [--raw]   (spec 60 §4 / §8)
         string wavPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "AssetSource", "cartesia_tts_test.wav");
         double? durationSeconds = null;
+        bool lowLatency = false, exclusive = false, raw = false, probeAll = false;
+        string? deviceId = null;
+        float volume = 0.3f; // --volume 0..1; the fixture is LOUD at unity
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -23,6 +26,12 @@ internal static class Program
             {
                 durationSeconds = double.Parse(args[++i]);
             }
+            else if (args[i] == "--volume" && i + 1 < args.Length) volume = Math.Clamp(float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture), 0f, 1f);
+            else if (args[i] == "--low-latency") lowLatency = true;
+            else if (args[i] == "--exclusive") exclusive = true;
+            else if (args[i] == "--raw") raw = true;
+            else if (args[i] == "--probe-all") probeAll = true; // open EVERY render endpoint in LowLatency and report the period it grants
+            else if (args[i] == "--device" && i + 1 < args.Length) deviceId = args[++i];
             else if (!args[i].StartsWith("--"))
             {
                 wavPath = args[i];
@@ -39,6 +48,22 @@ internal static class Program
 
         Console.WriteLine($"Loading: {wavPath}");
 
+        if (probeAll)
+        {
+            var manager = AudioOutput.GetDeviceManager();
+            if (manager == null) { Console.Error.WriteLine("No device manager on this platform"); return 1; }
+            foreach (var device in manager.GetOutputDevices())
+            {
+                try
+                {
+                    using var probe = AudioOutput.Create(new AudioFormat(48000, 2, SampleFormat.Float32), new AudioOutputOptions { Latency = AudioOutput_LatencyMode.LowLatency, SwitchPolicy = AudioSwitchPolicy.PreferenceList, PreferredDevices = [device.Id] });
+                    Console.WriteLine($"{device.DisplayName,-52} period {probe.PeriodFrames,5} frames = {probe.PeriodFrames * 1000.0 / probe.DeviceFormat.SampleRate,6:F2} ms @ {probe.DeviceFormat.SampleRate} Hz   {probe.LatencyModeActual}/{probe.LatencyFallbackReason}   id={device.Id}");
+                }
+                catch (Exception ex) { Console.WriteLine($"{device.DisplayName,-52} FAILED: {ex.Message}"); }
+            }
+            return 0;
+        }
+
         // Parse WAV and load all PCM data into memory (pre-allocated)
         var wav = WavReader.Load(wavPath);
         Console.WriteLine($"WAV: {wav.SampleRate}Hz, {wav.Channels}ch, {wav.BitsPerSample}bit, {wav.PcmData.Length} bytes ({wav.DurationSeconds:F2}s)");
@@ -48,10 +73,19 @@ internal static class Program
         var format = new AudioFormat(wav.SampleRate, wav.Channels, SampleFormat.Int16);
         Console.WriteLine($"Requesting format: {format.SampleRate}Hz, {format.Channels}ch, {format.Format}");
 
-        using var output = AudioOutput.Create(format, bufferSizeMs: 20);
+        var options = new AudioOutputOptions
+        {
+            BufferSizeMs = 20,
+            Latency = exclusive ? AudioOutput_LatencyMode.Exclusive : lowLatency ? AudioOutput_LatencyMode.LowLatency : AudioOutput_LatencyMode.Default,
+            Processing = raw ? AudioOutput_StreamProcessing.Raw : AudioOutput_StreamProcessing.SystemEffects,
+            SwitchPolicy = deviceId != null ? AudioSwitchPolicy.PreferenceList : AudioSwitchPolicy.FollowDefault, PreferredDevices = deviceId != null ? [deviceId] : null,
+        };
+        Console.WriteLine($"Requested: latency {options.Latency}, processing {options.Processing}");
+        using var output = AudioOutput.Create(format, options);
         Console.WriteLine($"Consumer format: {output.Format.SampleRate}Hz, {output.Format.Channels}ch, {output.Format.Format}");
         Console.WriteLine($"Device format: {output.DeviceFormat.SampleRate}Hz, {output.DeviceFormat.Channels}ch, {output.DeviceFormat.Format}");
         Console.WriteLine($"Latency: {output.LatencyMs:F1}ms");
+        Console.WriteLine($"Actual: latency {output.LatencyModeActual}, processing {output.StreamProcessingActual}, fallback {output.LatencyFallbackReason}, period {output.PeriodFrames} frames = {output.PeriodFrames * 1000.0 / output.DeviceFormat.SampleRate:F2} ms");
         Console.WriteLine($"Switch policy: {output.SwitchPolicy}");
         Console.WriteLine($"Current device: {output.CurrentDevice}");
 
@@ -110,6 +144,7 @@ internal static class Program
 
         double elapsed = stopwatch.Elapsed.TotalSeconds;
         Console.WriteLine();
+        Console.WriteLine($"Underruns: {output.UnderrunCount}   (period {output.PeriodFrames} frames, {output.LatencyModeActual}/{output.StreamProcessingActual})");
         if (timedOut)
             Console.WriteLine($"Duration test complete. Played for {elapsed:F1}s with {state.LoopCount} loops.");
         else if (state.Finished)
@@ -128,16 +163,18 @@ internal sealed class PlaybackState
 {
     private readonly WavData _wav;
     private readonly bool _looping;
+    private readonly float _volume;
     private int _position; // byte offset into PCM data
     private int _loopCount;
 
     public bool Finished { get; private set; }
     public int LoopCount => _loopCount;
 
-    public PlaybackState(WavData wav, bool looping)
+    public PlaybackState(WavData wav, bool looping, float volume = 1f)
     {
         _wav = wav;
         _looping = looping;
+        _volume = volume;
         _position = 0;
     }
 
@@ -249,6 +286,20 @@ internal sealed class PlaybackState
             }
         }
 
+        // Gain (in place, allocation-free) — the fixture is mastered hot; default --volume 0.3
+        if (_volume < 1f && framesWritten > 0)
+        {
+            if (dstIsFloat)
+            {
+                var f32 = MemoryMarshal.Cast<byte, float>(buffer.Slice(0, framesWritten * dstBytesPerFrame));
+                for (int i = 0; i < f32.Length; i++) f32[i] *= _volume;
+            }
+            else
+            {
+                var s16 = MemoryMarshal.Cast<byte, short>(buffer.Slice(0, framesWritten * dstBytesPerFrame));
+                for (int i = 0; i < s16.Length; i++) s16[i] = (short)(s16[i] * _volume);
+            }
+        }
         return framesWritten;
     }
 }
