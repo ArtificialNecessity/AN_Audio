@@ -4,8 +4,9 @@
 - **Package:** `ArtificialNecessity.Audio.Formats` (`AN.Audio.Formats.dll`), `src/AN.Audio.Formats/`, namespace `AN.Audio.Formats`
 - **Depends only on** `ArtificialNecessity.Audio.Common` (D15: the shared PCM vocabulary) and, from Phase 3, `NLayer`. Never on
   `ArtificialNecessity.Audio` itself. Pure managed, `AnyCPU`, NativeAOT-safe.
-- **Consumers:** MusicStudio (Sampler rows, samples rail — today a 60-line WAV-only hand-rolled decoder in
-  `src/AN.MusicStudio/Audio/Sampler/InstrumentSample.cs`), Mirica (TTS playback), Arcane Siege (SFX/music).
+- **Consumers:** MusicStudio (Sampler rows, samples rail — still on its 60-line WAV-only hand-rolled decoder in
+  `src/AN.MusicStudio/Audio/Sampler/InstrumentSample.cs` until Phase 1d lands there), Mirica (TTS playback), Arcane Siege (SFX/music).
+- **Implementation checklist / as-built deviations:** `50_Audio_Formats_IMPL.md` (table "As built").
 
 ## Why
 
@@ -58,24 +59,37 @@ public record struct AudioFormat(int SampleRate, int Channels, SampleFormat Form
 {
     public int BytesPerSample => Format switch { UInt8 => 1, Int16 => 2, Int24 => 3, Int32 => 4, Float32 => 4, Float64 => 8 };
     public int BytesPerFrame => BytesPerSample * Channels;
+    public int BitsPerSample => BytesPerSample * 8;   // container bits
 }
 
-[Flags] public enum AudioChannelMask : uint { FrontLeft = 0x1, FrontRight = 0x2, FrontCenter = 0x4, LowFrequency = 0x8, /* … SPEAKER_* order */ }
+[Flags] public enum AudioChannelMask : uint { None = 0, FrontLeft = 0x1, FrontRight = 0x2, FrontCenter = 0x4, LowFrequency = 0x8, /* … all 18 SPEAKER_* bits, Reserved, All */
+                                              Mono, Stereo, Quad, Surround, FivePointOne, FivePointOneSurround, SevenPointOne, SevenPointOneSurround /* KSAUDIO_SPEAKER_* layouts */ }
+public static class AudioChannelMaskExtensions { public static int PositionCount(this AudioChannelMask mask); }
 
 /// A typed window over interleaved PCM bytes: the ONE way a buffer + its format travel together.
-public readonly ref struct AudioBufferView(Span<byte> Bytes, AudioFormat Format)
+public readonly ref struct AudioBufferView(Span<byte> Bytes, AudioFormat Format)   // ctor throws unless Bytes is whole frames and Channels > 0
 {
     public int FrameCount => Bytes.Length / Format.BytesPerFrame;
-    public Span<float> AsFloat32()  /* Format must be Float32 */ => MemoryMarshal.Cast<byte, float>(Bytes);
-    public Span<short> AsInt16()    /* Format must be Int16  */ => MemoryMarshal.Cast<byte, short>(Bytes);
+    public Span<float>  AsFloat32();  public Span<short> AsInt16();   // throw InvalidOperationException unless Format matches
+    public Span<int>    AsInt32();    public Span<double> AsFloat64();
+    public AudioBufferView SliceFrames(int frameCount);  public AudioBufferView SliceFrames(int frameStart, int frameCount);
 }
 
 /// Span-based conversions between any two SampleFormats; the ONE place the `/ 2^(bits-1)` and `* 2^(bits-1)` rules live.
-public static class AudioSampleConvert { public static void Convert(ReadOnlySpan<byte> src, AudioFormat from, Span<byte> dst, AudioFormat to); /* same rate & channels */ }
+/// float→int is symmetric (* 2^(bits-1), rounded) and SATURATES (+1.0 → max, never wraps); int→int shifts; float→float casts, never clips.
+public static class AudioSampleConvert
+{
+    public static int Convert(ReadOnlySpan<byte> src, AudioFormat from, Span<byte> dst, AudioFormat to);   // same rate & channels; returns frames converted (min of both buffers)
+    public static int ToFloat32(ReadOnlySpan<byte> src, SampleFormat from, Span<float> dst);   // likewise ToFloat64 / ToInt16 / ToInt32
+    public static short FloatToInt16(float v);  public static int FloatToInt24(float v);  public static int FloatToInt32(double v);  public static byte FloatToUInt8(float v);
+    public static float Int16ToFloat(short v);  public static int ReadInt24(ReadOnlySpan<byte> src, int sampleIndex);  public static void WriteInt24(Span<byte> dst, int sampleIndex, int value);
+}
 ```
 
-`AudioSampleConvert` moves here from `AN.Audio/Internal/` (format conversion already exists there for device matching) so the
-resampler stays in `AN.Audio` and the sample-format conversion is shared. The sinc resampler does NOT move (it is device-side policy).
+`AudioSampleConvert` is new in Common. `AN.Audio/Internal/AudioFormatConverter` (device matching: resampler glue, channel mapping, ArrayPool)
+STAYS in `AN.Audio` and delegates its Int16↔float scalars to `AudioSampleConvert` — that changed the device write path from `* 32767` to the
+symmetric saturating `* 32768` (≤ 1 LSB, agreed 2026-09-08). It also now throws `NotSupportedException` for any `SampleFormat` other than
+Int16/Float32. The sinc resampler does NOT move (it is device-side policy).
 
 Repository/packaging consequences:
 - `src/AN.Audio.Common/AN.Audio.Common.csproj` → `ArtificialNecessity.Audio.Common`; `AN.Audio.csproj` and `AN.Audio.Formats.csproj` add a
@@ -132,10 +146,12 @@ public static class AudioDecoder
     public static IAudioDecoder Open(Stream source, AudioDecoder_FormatHint hint = default, bool leaveOpen = false);
     public static IAudioDecoder Open(string path);   // FileStream(SequentialScan, 64 KiB) + hint from extension
     public static AudioDecoder_Container? Sniff(ReadOnlySpan<byte> leadingBytes, AudioDecoder_FormatHint hint = default);
+    public static AudioDecoder_FormatHint HintFromExtension(string pathOrExtension);   // .wav/.flac/.mp3/.aif*/.ogg → hint, else None
 
     /// Convenience over the streaming path: decodes everything into one buffer (capacity hint = TotalFrames when known).
     public static AudioDecoder_Pcm DecodeAll(Stream source, AudioDecoder_FormatHint hint = default, bool leaveOpen = false);
     public static AudioDecoder_Pcm DecodeAll(string path);
+    public static AudioDecoder_Pcm DecodeAll(IAudioDecoder open);   // drains an already-open per-format decoder (metadata first, then audio); does not dispose it
 }
 
 public sealed class AudioDecoder_Pcm
@@ -144,10 +160,13 @@ public sealed class AudioDecoder_Pcm
     public float[] Interleaved { get; }            // exactly FrameCount * Channels
     public int FrameCount { get; }
     public bool EndedEarly { get; }
+    public TimeSpan Duration { get; }
 }
+
+// Both exceptions carry `AudioDecoder_Container? Container` and prefix the message with it ("Wav: …", "Flac: …").
 ```
 
-**Sniff table** (first 12 bytes, then more if needed):
+**Sniff table** (`Open` peeks 12 bytes; if nothing matches, or the match is MP3, it peeks up to 8 KiB so the two-frame MPEG rule can run):
 
 | Bytes | Container |
 |---|---|
@@ -166,34 +185,49 @@ Correct per the RIFF/WAVE spec (MS RIFF 1991, `mmreg.h`, EBU RF64), tolerant whe
 
 - **Chunk walk**: `RIFF` size `0`, `0xFFFFFFFF` or larger than the stream → treat length as unknown and walk to EOF (D10). Odd chunk
   with a missing final pad byte → accept (the `clap-808.wav` case). A chunk whose declared length overruns the stream → clamp; if it
-  is `data`, decode what exists and set `EndedEarly`. Unknown chunk ids are skipped but recorded (id, offset, length) in `Wav_Decoder.Chunks`.
+  is `data`, decode what exists and set `EndedEarly`. Unknown chunk ids are skipped but recorded in `Wav_Decoder.Chunks` as `Wav_ChunkInfo`
+  (id, offset, declared length, clamped length, `PadBytePresent`, and the raw body for non-`data` chunks ≤ 1 MiB). `data` length `0xFFFFFFFF`
+  (or `0` with unknown RIFF size) → unknown, read to EOF. `RF64` → `Unsupported` until Phase 4. `RiffLengthKnown` reports the header's honesty.
 - **`fmt `**: `Wav_FormatTag { Pcm = 1, IeeeFloat = 3, Alaw = 6, Mulaw = 7, Extensible = 0xFFFE, … }` as an enum (overview rule 1).
   `Extensible` resolves through the 16-byte SubFormat GUID (`KSDATAFORMAT_SUBTYPE_PCM` / `_IEEE_FLOAT`) and exposes `ValidBitsPerSample` +
-  `ChannelMask` (`AudioChannelMask` from Common, D15 — the earlier `Wav_ChannelMask` name is superseded). Supported now: PCM 8 (unsigned), 16, 24, 32 (incl. 20/24 valid bits in
-  32 containers), IEEE float 32/64, any channel count. A-law/µ-law: Phase 4 (tables are trivial). ADPCM/MP3-in-WAV: `Unsupported`.
-- **`data` before `fmt `** (seen in the wild) → buffered/seek back when the stream seeks; otherwise `FormatException` ("fmt after data on a non-seekable stream").
+  `ChannelMask` (`AudioChannelMask` from Common, D15 — the earlier `Wav_ChannelMask` name is superseded); `Wav_FormatChunk.EffectiveTag` gives the
+  resolved tag, `ContainerBytes` the per-sample container (from `BlockAlign / Channels`, else `ceil(bits/8)`). Supported now: PCM 8 (unsigned), 16, 24, 32
+  (incl. 20/24 valid bits in 24/32 containers; `Info.SourceBitDepth` = valid bits, `NativeFormat` = container), IEEE float 32/64, any channel count.
+  A-law/µ-law: Phase 4 (tables are trivial). ADPCM/MP3-in-WAV: `Unsupported`, naming the tag.
+- **`data` before `fmt `** (seen in the wild) → on a seekable stream the walk skips the body, finds `fmt`, then seeks back; otherwise
+  `FormatException` ("fmt chunk after data on a non-seekable stream").
 - **Metadata surfaced** (all optional, read only when present, never required for audio): `smpl` → `Wav_SamplerChunk { MidiUnityNote,
   MidiPitchFraction, Loops: Wav_SampleLoop[] { Start, End, Type, Fraction, PlayCount } }` (the Sampler's free root note + loop points);
   `cue ` → `Wav_CuePoint[]`; `LIST/INFO` → `Wav_InfoTags` (INAM, IART, ICMT, ISFT…); `inst` → `Wav_InstrumentChunk`; `bext` → left as
   raw bytes in `Chunks`. Chunks that follow `data` are read lazily after the audio on non-seekable streams (so `smpl` at the end of an HTTP
-  stream is available once `ReadFrames` returns 0).
+  stream is available once `ReadFrames` returns 0); `Wav_Decoder.MetadataComplete` says whether that has happened (always true after open on a
+  seekable stream, where the whole chunk list is walked eagerly).
 - Streaming: the decoder reads through `Internal/PeekableStream`; PCM is converted frame-block by frame-block (4096 frames) straight
-  from the byte stream into the caller's span. No whole-file buffer ever exists.
+  from the byte stream into the caller's span (Float32 sources go straight into the caller's `Span<float>` with no block at all). No whole-file buffer ever exists.
+- Seek (D11): `SeekToFrame` is a byte-offset computation (`dataStart + frame * BytesPerFrame`), clamped to `TotalFrames`; throws `NotSupportedException` when the stream cannot seek.
 
 ### `Flac/` — `Flac_Decoder : IAudioDecoder`
 
-- `Flac/Flac_ReferenceDecoder.cs` (D6, present) is the bitstream decoder, `internal`. Our public `Flac_Decoder` adds: `Flac_StreamInfo`
+- `Flac/Flac_ReferenceDecoder.cs` (D6, built) is the bitstream decoder, `internal sealed`. Our public `Flac_Decoder` adds: `Flac_StreamInfo`
   (min/max block size, min/max frame size, sample rate, channels, bits, total samples, MD5), `Flac_Tags` from `VORBIS_COMMENT`
-  (case-insensitive multimap; `TITLE`, `ARTIST`, …), `Flac_SeekTable`, `Flac_Picture` metadata skipped (recorded as present), and
+  (case-insensitive multimap; `TITLE`, `ARTIST`, …; `Vendor`), `Flac_SeekTable`, `MetadataBlocksPresent` (PICTURE etc. recorded, not parsed), and
   `NativeFormat = Int32` (D16: lossless integers, sign-extended in the low bits) via `ReadFramesNative`. The reference decoder skips
   non-STREAMINFO blocks byte by byte — the `// AN:` adaptation replaces that loop with one that parses the blocks we surface.
+  All types live in `Flac/Flac_MetadataTypes.cs`. Constructor: `Flac_Decoder(Stream, Flac_DecoderOptions?, leaveOpen)`.
 - Streaming: the reference decoder decodes ONE frame per `DecodeFrame()` into `long[channel][sample]`; the `// AN:` output path
   interleaves that block straight into the caller's `Span<int>`/`Span<float>` (no intermediate `byte[]`; the upstream `ConvertOutputToBytes`
-  path stays only for MD5 verification). Works on non-seekable streams as-is. `ValidateOutputHash`
-  (MD5 over the whole stream) is OFF by default; `Flac_DecoderOptions.VerifyMd5` turns it on for tests/importers.
-- Seek (D11): SEEKTABLE when present; otherwise binary-search on frame headers (sync `0xFFF8`/`0xFFF9` + CRC-8) when the stream seeks. Phase 2b.
-- Bit depths: 16/24 (Salamander) and 8/12/20/32 all decode; the float conversion uses the frame's actual bits, so the
-  `AllowNonstandardByteOutput` byte path of the reference decoder is irrelevant to us.
+  path stays only for MD5 verification). `Flac_Decoder` carries the decoded frame across `ReadFrames` calls of any size. Works on
+  non-seekable streams as-is; the reference `BitReader` reads through a 64 KiB buffer (not `Stream.ReadByte`). MD5 is OFF by default;
+  `Flac_DecoderOptions.VerifyMd5` turns it on (synchronous hash per frame) — `HasMd5` is false and verification is skipped when STREAMINFO carries
+  an all-zero signature ("not computed"; the Salamander set does this); `Md5Verified` is set at end of stream when it matched.
+- Truncation (D12): `EndOfStreamException` mid-frame or fewer samples than STREAMINFO declared → `EndedEarly`, no throw. Malformed → the reference
+  decoder's `InvalidDataException` is translated to `AudioDecoder_FormatException`; its `NotSupportedException` (property change mid-stream, >32-bit) to `AudioDecoder_UnsupportedException`.
+  The frame-header CRC-8 is verified (upstream skipped it) so both the decoder and the seek scanner reject false syncs.
+- Seek (D11, built): SEEKTABLE when present (`FindBefore(target)`); otherwise a binary search over byte offsets, each probe doing a forward
+  scan for a sync (`0xFFF8`/`0xFFF9`) whose header passes CRC-8 and agrees with STREAMINFO (channels, bits); then the decoder is re-seated
+  at that frame and decodes forward into the frame containing the target. `SeekToFrame` on a non-seekable stream throws `NotSupportedException`.
+- Bit depths: 16/24 (Salamander) and 8/12/20/32 all decode; the float conversion uses STREAMINFO bits (`/ 2^(bits-1)`). The reference decoder's
+  `AllowNonstandardByteOutput` is set true so the MD5 byte path works for every depth (MD5 is defined over the FLAC byte layout).
 
 ### `Mp3/` — `Mp3_Decoder : IAudioDecoder`
 
@@ -209,29 +243,35 @@ Correct per the RIFF/WAVE spec (MS RIFF 1991, `mmreg.h`, EBU RF64), tolerant whe
 ## Internal machinery (`Internal/`)
 
 - `PeekableStream : Stream` — wraps any `Stream`; buffers up to N bytes for `Sniff` and header parsing, replays them, then passes
-  through; `CanSeek` mirrors the inner stream; `Position` is correct in both modes. THE reason non-seekable sources work.
+  through; `CanSeek` mirrors the inner stream; `Position` is correct in both modes; `Peek(n)`, `Skip(n)`, `ReadFully`, `ReadExactlyOrThrow`. THE reason non-seekable sources work.
 - `ForwardOnlyStream` (tests only) — a `Stream` over a `byte[]` that reports `CanSeek = false`, `Length` throws, and hands out
   bytes in small random-sized chunks (1..97 bytes) to simulate a network read. Every format's tests run once seekable, once forward-only.
 - Sample-format conversion is NOT here: it is `AN.Audio.AudioSampleConvert` in `AN.Audio.Common` (D15), shared with the device layer.
-- `BitReader` — for WAV/AIFF headers; FLAC keeps the reference decoder's own reader.
+- `BitReader` — little/big-endian header field reads for WAV/AIFF; FLAC keeps the reference decoder's own (adapted) bit reader.
+- `MpegFrameHeader` — MPEG-1/2/2.5 layer I–III frame-header validation and frame length (bitrate/sample-rate tables) for the sniff table's "two consecutive valid frames" rule. Decoding itself is NLayer's (Phase 3).
 
 ## Repository changes
 
 ```
 src/AN.Audio.Common/               (D15) AudioFormat, SampleFormat, AudioChannelMask, AudioBufferView, AudioSampleConvert — nothing else
   AN.Audio.Common.csproj           net8.0;net9.0;net10.0, PackageId ArtificialNecessity.Audio.Common, no dependencies
-src/AN.Audio/                      gains ProjectReference → AN.Audio.Common; AudioFormat.cs and Internal sample conversion MOVE out
+src/AN.Audio/                      gains ProjectReference → AN.Audio.Common; AudioFormat.cs MOVED out (git mv); Internal/AudioFormatConverter STAYS
+                                   (device-side: resampler glue, channel mapping) and delegates its Int16<->float scalars to AudioSampleConvert
 src/AN.Audio.Formats/
   AN.Audio.Formats.csproj        net8.0;net9.0;net10.0, PackageId ArtificialNecessity.Audio.Formats, ProjectReference AN.Audio.Common, PackageReference NLayer (Phase 3)
-  AudioDecoder.cs                Open / Sniff / DecodeAll
+  AudioDecoder.cs                Open / Sniff / DecodeAll / HintFromExtension
   IAudioDecoder.cs  AudioDecoder_StreamInfo.cs  AudioDecoder_Pcm.cs  AudioDecoder_Exceptions.cs  AudioDecoder_Enums.cs
-  Internal/                      PeekableStream, BitReader
-  Wav/                           Wav_Decoder, Wav_FormatChunk (+enums), Wav_SamplerChunk, Wav_CuePoint, Wav_InfoTags, Wav_ChunkIndex
-  Flac/                          Flac_ReferenceDecoder.cs (subsumed SimpleFlac, MIT notice inside) + LICENSE-SimpleFlac.txt [PRESENT], Flac_Decoder, Flac_StreamInfo, Flac_Tags, Flac_SeekTable
-  Mp3/                           Mp3_Decoder, Mp3_Id3v2, Mp3_Id3Tags
-tests/AN.Audio.Formats.Tests/    xunit; Fixtures/ (generated WAVs + small redistributable FLAC/MP3); ForwardOnlyStream
-cmd/publish-local.cs             already packs the solution; add the project to AN.Audio.slnx
-_EXTERNAL_APIS/SimpleFlac_FlacDecoder.md, NLayer_MpegFile.md   [PRESENT]
+  Internal/                      PeekableStream, BitReader, MpegFrameHeader
+  Wav/                           Wav_Decoder.cs, Wav_FormatChunk.cs (Wav_FormatTag + Wav_FormatChunk), Wav_ChunkId.cs (Wav_ChunkId + Wav_ChunkInfo),
+                                 Wav_Metadata.cs (Wav_SamplerChunk, Wav_SampleLoop(+Type), Wav_CuePoint, Wav_InstrumentChunk, Wav_InfoTags)
+  Flac/                          Flac_ReferenceDecoder.cs (subsumed SimpleFlac, MIT notice inside, // AN: adaptations) + LICENSE-SimpleFlac.txt (packed),
+                                 Flac_Decoder.cs, Flac_MetadataTypes.cs (Flac_MetadataBlockType, Flac_StreamInfo, Flac_SeekPoint, Flac_SeekTable, Flac_Tags, Flac_DecoderOptions)
+  Mp3/                           (Phase 3) Mp3_Decoder, Mp3_Id3v2, Mp3_Id3Tags
+tests/AN.Audio.Common.Tests/     xunit: AudioFormat, AudioChannelMask, AudioBufferView, AudioSampleConvert (21 tests)
+tests/AN.Audio.Formats.Tests/    xunit (110 tests); Support/ ForwardOnlyStream, Wav_TestWriter, FlacFixtureTools; Fixtures/ (README.md + cartesia_tts_test{,_24}.{wav,flac});
+                                 SniffTests, PeekableStreamTests, WavDecoderTests(+_ForwardOnlyOverrun), FlacDecoderTests, LocalFileTests
+cmd/publish-local.cs             packs the solution (4 packages); projects added to AN.Audio.slnx
+_EXTERNAL_APIS/SimpleFlac_FlacDecoder.md, NLayer_MpegFile.md, WaveFormatExtensible_ChannelMask.md
 ```
 
 `AN.Audio.Build.props` is imported as in the other projects (timestamp versioning, analyzers, `artifacts/`). `<AllowUnsafeBlocks>false</AllowUnsafeBlocks>`
@@ -241,13 +281,15 @@ _EXTERNAL_APIS/SimpleFlac_FlacDecoder.md, NLayer_MpegFile.md   [PRESENT]
 
 | Area | Test |
 |---|---|
-| Sniff | each magic → container; ID3-prefixed MP3; garbage → Unsupported; hint tiebreak |
-| WAV | synthesized fixtures written by a test-side `Wav_TestWriter`: 8/16/24/32 PCM, float32/64, 1/2/6 ch, EXTENSIBLE with masks, odd chunk WITHOUT pad (the 99Sounds case), RIFF size 0 and 0xFFFFFFFF, `data` overrun, `smpl`+`cue`+`LIST` present, chunks after `data`, `fmt` after `data`; bit-exact float expectations |
-| FLAC | fixture FLAC vs its WAV rendering: bit-exact int32 and float; MD5 verify on; 24-bit stereo (Salamander-shaped); tags; total-samples = 0 → `TotalFrames == null` |
+| Sniff ✅ | each magic → container; ID3-prefixed MP3 (also when the tag exceeds the peek window); bare sync needs two valid frames; invalid bitrate/rate/version rejected; garbage → Unsupported; hint tiebreak only when content says nothing; `HintFromExtension` |
+| PeekableStream ✅ | peek/replay across the buffer boundary, skip from buffer + inner, short peek at EOF, seek fast path inside the buffer, forward-only throws on seek, `leaveOpen` |
+| WAV ✅ | synthesized fixtures written by a test-side `Wav_TestWriter`: 8/16/24/32 PCM, float32/64, 1/2/6 ch, EXTENSIBLE with masks (20-in-24, 20-in-32, float 5.1), odd chunk WITHOUT pad (the 99Sounds case), odd chunks with pad, RIFF size 0 / 0xFFFFFFFF / oversize, `data` length 0xFFFFFFFF, `data` overrun (RIFF-bounded and EOF-discovered), mid-frame truncation, `smpl`+`cue`+`LIST`+`inst` before and after `data`, `fmt` after `data`, unsupported tags named, malformed headers; bit-exact float AND native expectations; seek; `ReadFramesNative(AudioBufferView)` guards |
+| FLAC ✅ | fixture FLAC vs its WAV rendering: bit-exact int32 and float (16- and 24-bit); MD5 verify on (pass + detected corruption); tags; truncation → `EndedEarly`; corrupt sync → `FormatException`; total-samples = 0 → `TotalFrames == null`; seek with SEEKTABLE (synthesised) and via frame-header search; forward-only seek throws |
 | MP3 | fixture decodes to expected frame count ± 1 granule, sample rate/channels, ID3v2 title; `TotalFrames` null on forward-only stream |
-| Streaming | EVERY fixture through `ForwardOnlyStream`; results identical to the seekable run; `EndedEarly` on a truncated copy |
-| Allocation | D13: zero bytes allocated across 100 `ReadFrames` after warm-up, per format |
-| Facade | `DecodeAll` == concatenated `ReadFrames`; `leaveOpen` honoured |
+| Streaming ✅ | EVERY fixture through `ForwardOnlyStream`; results identical to the seekable run; `EndedEarly` on a truncated copy |
+| Allocation ✅ | D13: zero bytes allocated across 100 `ReadFrames` after warm-up, per format (WAV 16/24/float, FLAC). Note: xunit's `Assert.Equal<T>` allocates — count inside the loop, assert after |
+| Facade ✅ | `DecodeAll` == concatenated `ReadFrames` (growable path with unknown length); `leaveOpen` honoured |
+| Local ✅ | `[Trait("Category","Local")]`, skipped when the file is absent: `clap-808.wav` (24-bit mono, un-padded trailing `id3 `), Salamander `A0v3.flac` (24-bit stereo, zero MD5, seek == linear) |
 
 Fixture provenance: `AssetSource/cartesia_tts_test.wav` (ours) is the WAV master; its FLAC and MP3 renderings are generated ONCE with
 `ffmpeg` (if present on the dev machine — **Open Question Q1**) and committed under `tests/AN.Audio.Formats.Tests/Fixtures/` with a
@@ -257,25 +299,28 @@ Fixture provenance: `AssetSource/cartesia_tts_test.wav` (ours) is the WAV master
 ## Phases
 
 ### Phase 1 — package skeleton + WAV done right (unblocks MusicStudio today)
+Built 2026-09-08, commits `81d92b7` (Common) and `9584806` (Formats skeleton + WAV, one commit because the facade references `Wav_Decoder`). Published `0.260908.234621`.
 - [x] `src/AN.Audio.Common/` (D15): move `AudioFormat`/`SampleFormat` from `AN.Audio` (`git mv`), widen `SampleFormat`, add `AudioChannelMask`, `AudioBufferView`,
-      `AudioSampleConvert` (moved from `AN.Audio/Internal/`); `AN.Audio` gets the `ProjectReference`; existing `AN.Audio.Tests` still pass; spec 30 D27 + overview amended
+      `AudioSampleConvert` (new; `AN.Audio/Internal/AudioFormatConverter` stays and delegates its two per-sample helpers to it); `AN.Audio` gets the `ProjectReference`; existing `AN.Audio.Tests` still pass; spec 30 D27 + overview amended
 - [x] `src/AN.Audio.Formats/` project, csproj per the Midi one (`IsPackable`, README/LICENSE pack items, `InternalsVisibleTo` tests); add to `AN.Audio.slnx`
 - [x] Generic tier: `IAudioDecoder` (incl. `NativeFormat`/`ReadFramesNative`, D16), `AudioDecoder_StreamInfo`, enums, exceptions, `AudioDecoder.Open/Sniff/DecodeAll`, `AudioDecoder_Pcm`
-- [x] `Internal/PeekableStream`, `Internal/BitReader`
+- [x] `Internal/PeekableStream`, `Internal/BitReader`, `Internal/MpegFrameHeader` (sniff-time MPEG header validation)
 - [x] `Wav/` per §WAV including `smpl`/`cue`/`LIST` metadata and streaming reads; `ReadFramesNative` for PCM = a straight byte copy from the stream
-- [x] `tests/AN.Audio.Formats.Tests` with `Wav_TestWriter`, `ForwardOnlyStream`, the WAV rows + sniff + facade + allocation rows
+- [x] `tests/AN.Audio.Formats.Tests` with `Wav_TestWriter`, `ForwardOnlyStream`, the WAV rows + sniff + facade + allocation rows (88 tests at the end of Phase 1); Local test on `clap-808.wav` passes seekable and forward-only
 - [x] `_EXTERNAL_APIS/` notes; overview spec amendment (D14); README package list
-- [x] `cmd/publish-local` → LocalNuGet; bump `ANAudioVersion` in MusicStudio
-- [ ] **MusicStudio**: `InstrumentSample.Decode` → `AudioDecoder.DecodeAll` + mono→stereo up-mix / >2ch→stereo down-mix in ONE adapter
+- [x] `cmd/publish-local` → LocalNuGet (`0.260908.234621`, superseded by `0.260908.235755` after Phase 2)
+- [ ] **MusicStudio** (in `C:\PROJECTS\AN_MusicStudio`, not this repo): bump `ANAudioVersion` to `0.260908.235755` and reference `ArtificialNecessity.Audio.Formats`;
+      `InstrumentSample.Decode` → `AudioDecoder.DecodeAll` + mono→stereo up-mix / >2ch→stereo down-mix in ONE adapter
       (`InstrumentSample.FromDecoded`), `SourceBitsPerSample` from `Info.SourceBitDepth`; delete the hand-rolled RIFF walker; `InstrumentSampleChecks`
       gain the odd-pad and EXTENSIBLE cases; `FormatDescription` gains the container (`FLAC · 48000 Hz · 24-bit …`). Verify `clap-808.wav` loads.
 
 ### Phase 2 — FLAC
+Built 2026-09-08, commit `f31655c`. Published `0.260908.235755`. 110 Formats tests green; Local test on Salamander `A0v3.flac` (24-bit stereo, 1079560 frames, all-zero MD5) decodes fully and seek == linear decode.
 - [x] Subsume `FlacDecoder.cs` → `Flac/Flac_ReferenceDecoder.cs` + `Flac/LICENSE-SimpleFlac.txt` (2026-09-08, upstream `dc149aa`)
-- [x] `// AN:` adaptations: namespace `AN.Audio.Formats.Flac`, `internal`, metadata-block loop parses STREAMINFO/VORBIS_COMMENT/SEEKTABLE and skips PICTURE/PADDING/APPLICATION/CUESHEET, `Options` defaults to no byte conversion / no MD5, interleaved `Span<int>`/`Span<float>` frame output (D16), tabs → spaces per repo style
-- [x] `Flac_Decoder` + `Flac_StreamInfo` + `Flac_Tags` (VORBIS_COMMENT) + `ReadFramesNative` (Int32) / `ReadFrames` (float)
-- [x] Tests: fixture bit-exactness vs WAV, MD5 verify, forward-only stream, Salamander local test
-- [x] 2b: `SeekToFrame` via SEEKTABLE / frame-header search
+- [x] `// AN:` adaptations: namespace `AN.Audio.Formats.Flac`, `internal sealed`, metadata-block loop parses STREAMINFO/VORBIS_COMMENT/SEEKTABLE and records PICTURE/PADDING/APPLICATION/CUESHEET as present, `Options` defaults to no byte conversion / no MD5, interleaved `Span<int>`/`Span<float>` frame output (D16), tabs → spaces per repo style; plus buffered re-seatable `BitReader`, frame-header CRC-8 check, coded frame number → `BufferFirstSample`, `EndedShort` instead of throwing, MD5 skipped when STREAMINFO's signature is all zero
+- [x] `Flac_Decoder` + `Flac_MetadataTypes.cs` (`Flac_StreamInfo`, `Flac_Tags`, `Flac_SeekTable`/`Flac_SeekPoint`, `Flac_MetadataBlockType`, `Flac_DecoderOptions`) + `ReadFramesNative` (Int32) / `ReadFrames` (float); `AudioDecoder.Open` routes `fLaC`
+- [x] Tests (22): fixture bit-exactness vs WAV (16/24-bit, seekable + forward-only, odd read sizes), float parity via `AudioSampleConvert`, `DecodeAll` parity, MD5 pass + corruption, tags, truncation → `EndedEarly`, corrupt sync → `FormatException`, zero allocation, total = 0 → `TotalFrames == null`, Salamander local test
+- [x] 2b: `SeekToFrame` via SEEKTABLE when present, else byte-offset binary search with a forward sync scan validated by CRC-8 + STREAMINFO agreement; tested with a synthesised SEEKTABLE (`FlacFixtureTools`) and without
 - [ ] MusicStudio: `+ samples…` file filter adds `*.flac`; verify `A0v3.flac` in a Sampler row
 
 ### Phase 3 — MP3
@@ -291,9 +336,10 @@ Fixture provenance: `AssetSource/cartesia_tts_test.wav` (ours) is the WAV master
 
 ## Open questions
 
-- **Q1** Is `ffmpeg` (or `flac`/`lame`) on the dev machine to render the committed FLAC/MP3 fixtures? If not, hand-pick a small
-  permissively-licensed FLAC and MP3 and record their provenance.
+- **Q1** ANSWERED 2026-09-08: `ffmpeg` is on the dev machine (chocolatey). FLAC fixtures (16- and 24-bit) rendered from
+  `AssetSource/cartesia_tts_test.wav`; command lines in `tests/AN.Audio.Formats.Tests/Fixtures/README.md`. MP3 fixture: Phase 3, same tool.
 - **Q2** NLayer 3.0.0 vs 2.0.1: 3.0.0 fixes the non-seekable read bug (D2 needs it); confirm on `nuget.org` that the `NLayer` 3.0.0 package
   itself still targets `net8.0` with no dependencies before pinning (the search result says so; verify at implementation time).
 - **Q3** Should `AudioDecoder_Pcm` also carry the per-format metadata (`Wav_SamplerChunk`, `Flac_Tags`) as an optional `object? Metadata`,
-  or must clients wanting metadata use the per-format tier? Current draft: per-format tier only (keeps the generic type dumb).
+  or must clients wanting metadata use the per-format tier? Built: per-format tier only (keeps the generic type dumb); the
+  `AudioDecoder.DecodeAll(IAudioDecoder)` overload lets a caller open `Wav_Decoder`/`Flac_Decoder`, read metadata, then drain the audio.
