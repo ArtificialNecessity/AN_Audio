@@ -81,11 +81,11 @@ Bugs found by the tests while building: seekable `data` overrun did not set `End
 
 ### Phase 1d — MusicStudio adapter (done in the `C:\PROJECTS\AN_MusicStudio` workspace, NOT here)
 
-- [ ] `MusicStudio.Build.props` `ANAudioVersion` → `0.260908.235755` (Phase 2 publish; includes WAV + FLAC); add `<PackageReference Include="ArtificialNecessity.Audio.Formats" />`
-- [ ] `Audio/Sampler/InstrumentSample.cs`: delete the hand-rolled RIFF walker (`Decode(ReadOnlySpan<byte>)`); `Load(path)` → `AudioDecoder.DecodeAll(path)` → `InstrumentSample.FromDecoded(AudioDecoder_Pcm)` = the ONE adapter (mono→stereo up-mix, >2 ch→stereo down-mix by simple average of L-ish/R-ish per channel mask or first two channels; keep source rate); `SourceBitsPerSample` ← `Info.SourceBitDepth`; `FormatDescription` gains the container
-- [ ] `InstrumentSampleChecks`: replace the in-memory WAV fixtures with the `Wav_TestWriter` shapes that matter here (odd-pad, EXTENSIBLE 24-bit, float32, mono up-mix); `--audio-test` green
-- [ ] `SamplesRail_SourceCache` and `InstrumentSample_Cache` need no change (they call `InstrumentSample.Load`); `+ samples…` / Import file filters gain `*.flac;*.mp3` as Phases 2/3 land
-- [ ] `_PROJECT_STRUCTURE.md` checkpoint note: decoding now lives in `AN.Audio.Formats`; verify `clap-808.wav` loads in a Sampler row
+- [x] `MusicStudio.Build.props` `ANAudioVersion` → `0.260908.235755`; `<PackageReference Include="ArtificialNecessity.Audio.Formats" />` (2026-09-09)
+- [x] `Nodes/Source/Sampler/InstrumentSample.cs` (file had moved from `Audio/Sampler/`): RIFF walker deleted; `Load(path)` → `AudioDecoder.DecodeAll(path)`; `Decode(byte[], hint)` for in-memory callers; `FromDecoded(AudioDecoder_Pcm)` = the ONE adapter (mono duplicated, >2 ch → FIRST TWO channels — the channel mask is not consulted, the front pair is first in every SPEAKER_* layout; source rate kept); new `SourceContainer`, `SourceEndedEarly`; `FormatDescription` = `FLAC · 48000 Hz · 24-bit · Stereo · …` (+ `· truncated`)
+- [x] `InstrumentSampleChecks`: local `BuildWav` (16/24-bit PCM, float32, EXTENSIBLE, odd trailing chunk WITHOUT pad) — the shapes: odd tail, EXTENSIBLE 24-bit, EXTENSIBLE float32 bit-exact, 24-bit mono up-mix, 6-ch → front pair, truncation INTO `data` → `SourceEndedEarly` + FrameCount−1, truncated trailing tag → untouched audio, Salamander `A0v3.flac` when present; `--audio-test` green (13/13 result files)
+- [x] `SamplesRail_SourceCache.Decode` passes `HintFromExtension`; `InstrumentSample_Cache` unchanged; the three file pickers offer `wav` + `flac` (`FileFilter(desc, params extensions)`) — `mp3` added when Phase 3 publishes
+- [x] `_PROJECT_STRUCTURE.md` checkpoint note; verified `clap-808.wav` (24-bit mono, 47360 frames) and `A0v3.flac` (1079560 frames) decode; full sweep of the user's sample library: 321/321 WAVs decode
 
 ## Phase 2 — FLAC
 

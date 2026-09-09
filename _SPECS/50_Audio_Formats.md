@@ -1,11 +1,10 @@
 # 50 — AN.Audio.Formats: managed audio FORMAT decoding (WAV, FLAC, MP3, …)
 
-- **Status:** v2 (2026-09-08) — D1–D16 agreed; **Phase 1 built** (Common + Formats skeleton + WAV, published as 0.260908.234621; MusicStudio adapter 1d pending in that repo); **Phase 2 built** (FLAC incl. seeking, published as 0.260908.235755); Phase 3 (MP3) not started
+- **Status:** v2 (2026-09-08) — D1–D16 agreed; **Phase 1 built** (Common + Formats skeleton + WAV, published as 0.260908.234621; MusicStudio adapter 1d done 2026-09-09); **Phase 2 built** (FLAC incl. seeking, published as 0.260908.235755); Phase 3 (MP3) not started
 - **Package:** `ArtificialNecessity.Audio.Formats` (`AN.Audio.Formats.dll`), `src/AN.Audio.Formats/`, namespace `AN.Audio.Formats`
 - **Depends only on** `ArtificialNecessity.Audio.Common` (D15: the shared PCM vocabulary) and, from Phase 3, `NLayer`. Never on
   `ArtificialNecessity.Audio` itself. Pure managed, `AnyCPU`, NativeAOT-safe.
-- **Consumers:** MusicStudio (Sampler rows, samples rail — still on its 60-line WAV-only hand-rolled decoder in
-  `src/AN.MusicStudio/Audio/Sampler/InstrumentSample.cs` until Phase 1d lands there), Mirica (TTS playback), Arcane Siege (SFX/music).
+- **Consumers:** MusicStudio (Sampler rows, samples rail — `Nodes/Source/Sampler/InstrumentSample.cs` now calls `AudioDecoder.DecodeAll`; the hand-rolled WAV walker is gone, Phase 1d), Mirica (TTS playback), Arcane Siege (SFX/music).
 - **Implementation checklist / as-built deviations:** `50_Audio_Formats_IMPL.md` (table "As built").
 
 ## Why
@@ -309,7 +308,7 @@ Built 2026-09-08, commits `81d92b7` (Common) and `9584806` (Formats skeleton + W
 - [x] `tests/AN.Audio.Formats.Tests` with `Wav_TestWriter`, `ForwardOnlyStream`, the WAV rows + sniff + facade + allocation rows (88 tests at the end of Phase 1); Local test on `clap-808.wav` passes seekable and forward-only
 - [x] `_EXTERNAL_APIS/` notes; overview spec amendment (D14); README package list
 - [x] `cmd/publish-local` → LocalNuGet (`0.260908.234621`, superseded by `0.260908.235755` after Phase 2)
-- [ ] **MusicStudio** (in `C:\PROJECTS\AN_MusicStudio`, not this repo): bump `ANAudioVersion` to `0.260908.235755` and reference `ArtificialNecessity.Audio.Formats`;
+- [x] **MusicStudio** (done 2026-09-09 in `C:\PROJECTS\AN_MusicStudio`; details in the IMPL Phase 1d list — `InstrumentSample.cs` now lives at `Nodes/Source/Sampler/`, >2 ch takes the front pair, 321/321 library WAVs decode): bump `ANAudioVersion` to `0.260908.235755` and reference `ArtificialNecessity.Audio.Formats`;
       `InstrumentSample.Decode` → `AudioDecoder.DecodeAll` + mono→stereo up-mix / >2ch→stereo down-mix in ONE adapter
       (`InstrumentSample.FromDecoded`), `SourceBitsPerSample` from `Info.SourceBitDepth`; delete the hand-rolled RIFF walker; `InstrumentSampleChecks`
       gain the odd-pad and EXTENSIBLE cases; `FormatDescription` gains the container (`FLAC · 48000 Hz · 24-bit …`). Verify `clap-808.wav` loads.
@@ -321,7 +320,7 @@ Built 2026-09-08, commit `f31655c`. Published `0.260908.235755`. 110 Formats tes
 - [x] `Flac_Decoder` + `Flac_MetadataTypes.cs` (`Flac_StreamInfo`, `Flac_Tags`, `Flac_SeekTable`/`Flac_SeekPoint`, `Flac_MetadataBlockType`, `Flac_DecoderOptions`) + `ReadFramesNative` (Int32) / `ReadFrames` (float); `AudioDecoder.Open` routes `fLaC`
 - [x] Tests (22): fixture bit-exactness vs WAV (16/24-bit, seekable + forward-only, odd read sizes), float parity via `AudioSampleConvert`, `DecodeAll` parity, MD5 pass + corruption, tags, truncation → `EndedEarly`, corrupt sync → `FormatException`, zero allocation, total = 0 → `TotalFrames == null`, Salamander local test
 - [x] 2b: `SeekToFrame` via SEEKTABLE when present, else byte-offset binary search with a forward sync scan validated by CRC-8 + STREAMINFO agreement; tested with a synthesised SEEKTABLE (`FlacFixtureTools`) and without
-- [ ] MusicStudio: `+ samples…` file filter adds `*.flac`; verify `A0v3.flac` in a Sampler row
+- [x] MusicStudio: file pickers offer `wav` + `flac`; `A0v3.flac` verified (2026-09-09)
 
 ### Phase 3 — MP3
 - [ ] `PackageReference NLayer 3.0.0`; `Mp3_Decoder` wrapper; `Mp3_Id3v2` parser; `GaplessInfo`
