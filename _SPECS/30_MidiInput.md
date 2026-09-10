@@ -2,14 +2,15 @@
 
 - **Status:** Approved 2026-09-07; Sprint 1 implemented and hardware-validated (see §8 log)
 - **Consumers:** MusicStudio `_SPECS/Bringup/17_NoteCapturePath.md` Milestone 1 (sound on keypress, zero config)
-- **Ground truth:** `_EXTERNAL_APIS/WinMM_MidiIn.md` (read from the Windows SDK headers)
+- **Ground truth:** `_EXTERNAL_APIS/WinMM_MidiIn.md` (read from the Windows SDK headers); `_EXTERNAL_APIS/CoreMidi.md` (read from the macOS 15 SDK headers, offsets measured)
 - **Sibling specs:** `10_Audio_Bringup.md`, `20_Audio_Device_Management.md`
 
 - [x] Sprint 1 — Windows/WinMM input: enumerate, open-all, short messages, SysEx Identity Request/Reply, polling hot-plug, ring + raw callback, tests (55 xunit + `SimpleMidiTest` on Akai MPK mini IV)
 - [x] Sprint 1b (2026-09-07) — D24 drop `AN.Audio` dependency; D25 MIDI 2.0-ready `MidiInput_Message` (UMP-word storage, `Protocol`, 64-bit `DriverTimestamp`, two accessor tiers, raw fields internal); D26 `Midi_RelativeDecode` / `Midi_BitScaling`; 109 xunit
 - [ ] Sprint 2 — Hot-plug options: host `WM_DEVICECHANGE` hook; library-owned hidden window on a side thread
 - [ ] Sprint 3 — `IMidiOutput` (full send path: short + SysEx), Windows
-- [ ] Sprint 4 — macOS CoreMIDI, Linux ALSA-seq (input, then output)
+- [ ] Sprint 4a — macOS CoreMIDI input via the C API (`MIDIReadProc`/`MIDIPacketList`), OS hot-plug notifications, Identity Request via `MIDISendSysex` — **spec'd 2026-09-10, §10**
+- [ ] Sprint 4b — macOS UMP receive (`MIDIInputPortCreateWithProtocol`, hand-built block); Linux ALSA-seq (input, then output)
 - [ ] Sprint 5 — Android (`android.media.midi`), iOS (CoreMIDI) once AN.Audio itself has those platforms
 - [ ] Later — Windows MIDI Services App SDK / MIDI 2.0 UMP backend behind the same interface (`MidiInput_Message.FromUmp` is the entry point; no consumer change, D25)
 - [ ] Later — MIDI-CI Discovery + Property Exchange `DeviceInfo` (per-unit serial), needs Sprint 3 output; see `_EXTERNAL_APIS/UMP_MIDI2_Format.md` §MIDI-CI
@@ -293,3 +294,84 @@ Resolved 2026-09-07 (moved into Decisions): packaging → D21; `MIM_MOREDATA` �
 - Folding velocity-0 note-on into `NoteOff` at the wire level — rejected (D15).
 - `WM_DEVICECHANGE` as the only hot-plug source — rejected for v1: requires a window; kept as Sprint 2 options.
 - Silently ignoring or deferring `Stop()`/`Dispose()` called from inside the callback — rejected in favour of throwing (D14): silent handling hides a consumer bug that would otherwise deadlock or crash inside `midiInClose`.
+
+## 10. macOS implementation plan (`Platforms/MacOS/`, Sprint 4a/4b) — added 2026-09-10
+
+- **Ground truth:** `_EXTERNAL_APIS/CoreMidi.md` (macOS 15 SDK headers + compiled probe; struct offsets measured on arm64)
+- **Status:** Spec'd, not started. Hardware on hand: Hercules DJControl Inpulse 500 (1 source / 1 destination, MIDI 1.0)
+
+### 10.1 Decisions
+
+| # | Decision | Choice | Rationale |
+|---|---|---|---|
+| D28 | macOS backend | **CoreMIDI C API via `[DllImport("/System/Library/Frameworks/CoreMIDI.framework/CoreMIDI")]`** plus a 6-function CoreFoundation shim (`CFStringCreateWithCString`, `CFStringGetCString`, `CFStringGetLength`, `CFRelease`, `CFRunLoopRun`, `CFRunLoopStop`, `CFRunLoopGetCurrent`) and `mach_timebase_info` from libSystem. **No dependency on `AN.OSXBindings`**, no Objective-C runtime. | CoreMIDI is `extern "C"` end to end; every needed entry point has a C-function-pointer form. Same "PInvoke straight into the OS" philosophy as D3, one AnyCPU DLL, no native blobs. |
+| D29 | Receive path, two steps | **Sprint 4a:** `MIDIInputPortCreate` + `MIDIReadProc` (`MIDIPacketList`, MIDI 1.0 bytes) → `MidiInput_Message.FromMidi1`, identical decode to WinMM. **Sprint 4b:** `MIDIInputPortCreateWithProtocol(kMIDIProtocol_2_0)` + `MIDIReceiveBlock` (`MIDIEventList`, native UMP) → `FromUmp` (D25), which requires a hand-built ObjC block literal (`isa=_NSConcreteGlobalBlock`, `invoke` = `UnmanagedCallersOnly` fn ptr; ~30 lines, no ObjC messaging). Both ports on the same client; 4b replaces 4a per-port when the endpoint reports `kMIDIPropertyProtocolID == 2`, else keeps the byte path. | The C path is `API_TO_BE_DEPRECATED` (no removal date, exported in macOS 15, what every non-UMP DAW uses) and reuses 100 % of the tested WinMM decode. UMP needs a MIDI 2.0 device to validate against; none on hand. **See open question Q1.** |
+| D30 | Device key on macOS | `MidiInput_DeviceKey = "coremidi-uid:{MIDIUniqueID}"`. **No ordinal suffix** — `MIDIUniqueID` is unique by construction and persists across replug/reboot for the same device on the same USB port. Enumeration index is never exposed (as WinMM index, D11). | The D11 "two identical GUID-less units" limitation does not exist here; the key is honest without the ordinal. A device moved to a different USB port gets a new uid → new key, old one appears `Offline` — the D19 rule (fall back to `TypeId` + name) already covers this. |
+| D31 | Type-id fallback on macOS | `MidiInput_DeviceTypeId.UnknownFromDriverStrings(displayName, manufacturer, model)` — **new overload** (hash of `midi-driverstrings|{displayName}|{manufacturer}|{model}`), because CoreMIDI reports manufacturer/model as strings, not `ushort` ids. The Identity-Reply path (`FromIdentity`) is unchanged and preferred. | D11 fallback must not force strings through a `ushort` signature; a second canonical form is the honest shape. |
+| D32 | Paired output | **Structural**, not by name: `MIDIEndpointGetEntity(source)` → `MIDIEntityGetDestination(entity, 0)`. `HasPairedOutput = false` when the source has no entity (virtual endpoints: IAC, network sessions, other apps' `MIDISourceCreate`). | CoreMIDI groups each cable's in/out pair into one entity; the WinMM name-matching heuristic becomes unnecessary and would be wrong for IAC buses. |
+| D33 | Identity Request send | `MIDISendSysex` with a pinned `MIDISysexSendRequest` (40 bytes, offsets in the API doc) and an `UnmanagedCallersOnly` completion proc; **no output port needed**. Timeout (`IdentityReplyTimeoutMs`) → set `complete = 1` (abort), wait for the completion callback, then free. Same D9 silence-on-failure semantics. Grows into `CoreMidi_MidiOutput` in Sprint 3-mac. | Mirrors `WinMm_MidiOutLongSender` one-to-one; the header explicitly documents `complete = true` as the abort mechanism. |
+| D34 | Hot-plug on macOS | **`MidiInput_HotPlugSource.OsNotification` (new enum value, default on macOS)**: `MIDINotifyProc` on a library-owned run-loop thread (D35) receives `ObjectAdded / ObjectRemoved / PropertyChanged(kMIDIPropertyOffline) / SetupChanged / IOError`; each is a **trigger** for a debounced (50 ms) full re-enumerate + diff by `MIDIUniqueID` — never trusted as the device list. `Poll` still works (same re-enumerate); `NotifyDeviceChange()` maps to the same path. `HostSupplied`/`LibraryWindow` are Windows-only and throw `PlatformNotSupportedException` on macOS. **Sources with `kMIDIPropertyOffline == 1` are excluded from enumeration.** | CoreMIDI keeps a remembered device in the setup and may toggle `Offline` instead of removing it; several notifications arrive per plug event. Debounce + diff is what CoreMIDI DAWs do and matches the existing WinMM rescan/diff code. |
+| D35 | Client + run loop ownership | One process-wide **`CoreMidi_Client`** singleton (created lazily, shared by `CoreMidi_MidiInput` instances and `CoreMidi_MidiInDeviceManager`) owning **one dedicated thread** that calls `MIDIClientCreate` and then `CFRunLoopRun()`. Disposed via `CFRunLoopStop` → `MIDIClientDispose` at process exit only (ports are disposed per instance). Every `IMidiInput` gets its own `MIDIPortRef`. | Header: notifications are delivered "on the runloop (thread) on which `MIDIClientCreate` was first called" — a .NET process has no run loop, so the library must own one. Apple recommends one client per process. |
+| D36 | Timestamps on macOS | **Amended 2026-09-10 after measurement:** `MIDITimeStamp` and `Stopwatch.GetTimestamp()` are the **same clock but different units** — Stopwatch on macOS is `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)` = `mach_absolute_time × numer/denom` **nanoseconds** (`Stopwatch.Frequency == 1e9`; agreement to 1 ns measured). So `DriverTimestamp = MIDITimeStamp × numer / denom` (`CoreMidi_Client.MachToStopwatchTicks`, exact integer math) — **no anchor needed**. Proven at client start (`Stopwatch.Frequency == 1e9` and scaled values agree < 1 ms → `MachClockIsStopwatchClock`); if the proof fails the port falls back to the D6 min-anchor on the scaled value. | The original assumption ("same unit, identity") was wrong by the timebase ratio (125/3 on Apple silicon) and was caught by the layout test on the first run; the mechanism is now measured, not assumed. `DeliveryLagMs` has ns resolution. |
+| D37 | Exclusivity on macOS | `MidiInput_LostReason.InUseByAnotherApplication` is **never** raised on macOS (multi-client by design, no such error code). `kMIDINotPermitted` (-10844, Bluetooth entitlement / sandbox) → `DriverError`; `kMIDIUnknownEndpoint` / `kMIDIObjectNotFound` → `Unplugged`. | D16/D18 are Windows realities; the enum stays cross-platform, the mapping is per backend. |
+| D38 | Packet iteration | Hand-rolled `MIDIPacketNext` in C#: `next = data + length`, then on `Architecture.Arm64` round up to 4 bytes (header macro); `timeStamp` read with `Unsafe.ReadUnaligned` (packet[0] sits at list offset +4). `MIDIEventPacketNext` = `words + wordCount`, no rounding. A `MIDIPacket` may hold several complete non-SysEx messages back to back → sequential status-driven parse; SysEx packets contain only SysEx (possibly fragments) → `Midi_SysExReassembler`. | The macros are `CF_INLINE` — not exported, must be reimplemented; arm64 vs x86_64 differ. Measured offsets in the API doc are asserted by test. |
+
+### 10.2 Files
+
+| File | Contents |
+|---|---|
+| `CoreMidi_Interop.cs` | `[DllImport]` prototypes exactly as in `_EXTERNAL_APIS/CoreMidi.md`; `CoreMidi_ObjectRef` (`uint`-backed record struct; `Client/Port/Device/Entity/Endpoint` as distinct record structs), `CoreMidi_UniqueId` (`int`), `CoreMidi_Status : int` enum (`NoErr = 0, InvalidClient = -10830 … UnknownError = -10845`), `CoreMidi_NotificationId : int` (`SetupChanged = 1 … IOError = 7`), `CoreMidi_ObjectType : int`, `CoreMidi_ProtocolId : int` (`Midi1 = 1, Midi2 = 2`); `Pack = 4` structs `CoreMidi_Packet`, `CoreMidi_PacketList`, `CoreMidi_EventPacket`, `CoreMidi_EventList`, `CoreMidi_Notification`, `CoreMidi_ObjectAddRemoveNotification`, `CoreMidi_PropertyChangeNotification`, `CoreMidi_IOErrorNotification`, `CoreMidi_SysexSendRequest`; `CoreMidi_PropertyKeys` (resolves `kMIDIProperty*` via `NativeLibrary.GetExport` + dereference, once). `CoreFoundation_Interop` and `Mach_Interop` in the same file. **No literal constants outside this file (D12).** |
+| `CoreMidi_Client.cs` | D35 singleton: run-loop thread, `MIDIClientCreate`, `[UnmanagedCallersOnly] NotifyProc` → debounced `DeviceSetupChanged` event (internal), timebase check (D36), `CFRunLoopStop` on dispose. |
+| `CoreMidi_MidiInEnumerator.cs` | `MIDIGetNumberOfSources` → for each non-Offline source: `CoreMidi_MidiInDeviceEntry` (endpoint ref, uid, `DisplayName`, manufacturer/model, `Key` per D30, fallback `TypeId` per D31, paired destination ref per D32). Shared by input and device manager. |
+| `CoreMidi_MidiInPort.cs` | One `MIDIPortRef` per `IMidiInput` instance (not per source): `MIDIInputPortCreate`, `MIDIPortConnectSource(port, source, (void*)slot)` per opened source, `[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])] static void ReadProc(...)` that stamps `ArrivalTicks`, walks packets (D38), hands short messages to the owner (ring / raw callback) and SysEx bytes to the reassembler, swallows exceptions at the boundary. In-flight counter + `IsInsideCallback` exactly as WinMM (D14). `DisconnectSource` on close; `MIDIPortDispose` on Stop. |
+| `CoreMidi_MidiInput.cs` | `IMidiInput`: 256-slot port table, worker thread (rescan on `DeviceSetupChanged` or poll, SysEx dispatch, identity requests, overflow reporting). Same shape as `WinMm_MidiInput`; the two should share an `Internal/MidiInput_PortTable` if the duplication is >100 lines (decide during implementation). |
+| `CoreMidi_MidiInDeviceManager.cs` | `IMidiInput_DeviceManager` singleton: subscribes to `CoreMidi_Client.DeviceSetupChanged`, diffs by uid, fires `DeviceListChanged`. |
+| `CoreMidi_SysexSender.cs` | D33 Identity Request sender. |
+| `MidiInput.cs` (root) | `IsAvailable` adds `OSPlatform.OSX`; `Create` / `GetDeviceManager` branch to `CoreMidi_*`. |
+
+### 10.3 Public API deltas (all additive)
+
+```csharp
+public enum MidiInput_HotPlugSource { Poll, HostSupplied, LibraryWindow, OsNotification /* D34: macOS default; CoreMIDI notifications */ }
+public readonly record struct MidiInput_DeviceTypeId { static UnknownFromDriverStrings(string displayName, string? manufacturer, string? model); }   // D31
+// MidiInput_Options: no new members. PollIntervalMs is honoured on macOS only when HotPlugSource == Poll.
+// MidiInput_Options.EnableIoStatus / SysExBuffersPerPort / SysExBufferBytes are ignored on macOS (documented on the properties).
+```
+
+### 10.4 Tests
+
+- `CoreMidi_InteropLayoutTests` (`[Fact]`s skip unless `OperatingSystem.IsMacOS()`): `Marshal.OffsetOf` for every struct field equals the measured values in the API doc (`Packet.Length @8`, data @10, `PacketList.packet @4`, `EventPacket.words @12`, `EventList.packet @8`, `SysexSendRequest` 40 bytes with `completionProc @24`); every enum value equals its header constant (D12); `MIDIGetNumberOfSources()` callable; `kMIDIPropertyName` resolves non-null; `mach_timebase_info` non-zero; `Stopwatch.GetTimestamp()` ≡ `mach_absolute_time()` within 1 ms (D36).
+- `CoreMidi_PacketWalkTests`: synthetic `MIDIPacketList` byte images (arm64 padding and x86_64 no-padding variants, built by hand from the offsets) → expected message sequence; multi-message packet; SysEx split across three packets → one `SysExReceived`.
+- Existing `Midi_*` / `MidiInput_*` tests are platform-neutral and already run on macOS (verify in CI matrix).
+- `tests/SimpleMidiTest` gains nothing platform-specific; add `cmd/test-midi.sh`. Hardware log to be appended to §8 (DJControl Inpulse 500).
+
+### 10.5 Sprint 4a checklist
+
+- [x] `_EXTERNAL_APIS/CoreMidi.md` (2026-09-10)
+- [x] `CoreMidi_Interop.cs` + `CoreMidi_InteropLayoutTests` green on this Mac (126 xunit total, all passing)
+- [x] `CoreMidi_Client` (run-loop thread, notify proc, timebase proof — D36 amended)
+- [x] Enumerator + device manager; `SimpleMidiTest` lists and opens the DJControl Inpulse 500
+- [x] Port + input: packet walker + byte parser covered by `CoreMidi_PacketWalkTests` (multi-message packet, 3-fragment SysEx with interleaved clock, truncated tail)
+- [x] Identity Request via `MIDISendSysex` — DJControl answered (see log)
+- [x] **Hands-on** (user, 2026-09-10): CCs and NoteOn/velocity-0 in the ring, `lag` 0.02–0.03 ms
+- [ ] Hot-plug: unplug/replug → `DeviceLost`/`DeviceOpened`, key stable (D30) — hands-on
+- [x] README platform table: macOS ✔ (input); `cmd/test-midi.sh` added
+- [ ] Sprint 4b: UMP port via hand-built block (needs a MIDI 2.0 device or a virtual UMP source for validation)
+
+### 10.7 Hardware log (2026-09-10, Hercules DJControl Inpulse 500, macOS 15.7.7 arm64, .NET 10)
+
+- Enumerated 1 source: `DJControl Inpulse 500`, key `coremidi-uid:-1187549607`, `HasPairedOutput = true` (entity has 1 destination — D32 worked without name matching), `kMIDIPropertyProtocolID = 1`.
+- `Start()` opened it (`[opened]`), `Stop()` closed it (`[lost:Stopped]`); no exceptions across client create → port create → connect → disconnect → port dispose.
+- **Identity Reply received** via `MIDISendSysex` → reassembler → parser: `F0 7E 7F 06 02 00 01 4E 02 00 1C 00 01 00 00 00 F7` (17 bytes) — `mfr=00 01 4E` (Guillemot/Hercules, 3-byte id), family=2, member=28, rev=1. `TypeId` upgraded from the D31 string-hash to the identity-derived GUID. (The earlier piped-stdin run quit before the reply arrived — it is not silent after all.)
+- Interactive (user): CCs on ch3 (#8 always 0 + #40 = jog/encoder pairs), pads as NoteOn ch8 with velocity-0 releases (D15 folding exercised: `IsNoteOff` true, `Kind == NoteOn`). Multiple messages per packet delivered in order with identical timestamps.
+- **Delivery lag 0.02–0.03 ms** (CoreMIDI receive thread → our callback), ns resolution — vs. ~1 ms quantised on WinMM.
+- **Finding → D36 amended:** first layout-test run showed `Stopwatch.GetTimestamp()` ≠ `mach_absolute_time()`; probe confirmed Stopwatch is the same clock in **nanoseconds** (× 125/3 here). Conversion is now an exact scale; the identity assumption is gone.
+- **Finding → interop:** `MIDISysexSendRequest` is declared AFTER the header's `#pragma pack(pop)`, so it is naturally aligned (40 bytes, `data@8`); the first draft's `Pack = 4` gave 36. Layout tests caught it before any send.
+- Implementation note: `CoreMidi_MidiInput` duplicates ~250 lines of `WinMm_MidiInput` (slot table, worker loop, SysEx/identity drains). A shared `Internal/MidiInput_PortTable` base was deferred because the Windows side cannot be re-tested from this machine; revisit when both backends are buildable in one CI run.
+
+### 10.6 Open questions (macOS)
+
+- **Q1 (D29):** Go straight to `MIDIInputPortCreateWithProtocol` (UMP, block-based) in 4a and skip the legacy byte path entirely? Pro: one path, no `API_TO_BE_DEPRECATED` surface, `FromUmp` exercised for real. Con: block ABI hand-rolled without a MIDI 2.0 device to prove the MT 0x4 branch; the 1.0 devices we have arrive as MT 0x2 either way. **Proposed: 4a byte path first (reuses tested decode), 4b UMP — needs user approval as the deviation from "UMP everywhere" is deliberate.**
+- **Q2:** Virtual endpoints (IAC / network) — enumerate and open them under `AllDevices` (they are legitimate sources, e.g. from a DAW), or exclude by `kMIDIPropertyDriverOwner`? Proposed: include; consumers filter by `Name`/`Key`.
+- **Q3:** Should `CoreMidi_Client` also be exposed as an opt-in `MidiInput_Options.RunLoopThread = Host` for apps that already own the main `CFRunLoop` (FluidUI on macOS)? Proposed: not in 4a; the dedicated thread is always correct, merely one extra thread.
+- **Q4:** Minimum macOS. .NET 8 requires macOS 12+, so every API here (incl. UMP, 11.0) is always present; no runtime version gating needed. Confirm we do not target `net8.0-macos`-style TFMs (we do not — plain `net8.0`/`net9.0`/`net10.0`, AnyCPU).

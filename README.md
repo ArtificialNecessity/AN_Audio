@@ -111,7 +111,8 @@ cmd\test-midi.cmd
 | Platform | MIDI backend | Status |
 |----------|--------------|--------|
 | Windows | WinMM `midiIn*` (works with legacy stack and Windows MIDI Services) | ✅ Working (input; identity request output only) |
-| macOS / Linux | CoreMIDI / ALSA seq | 🔲 Planned |
+| macOS | CoreMIDI (C API via PInvoke; OS hot-plug notifications; `MIDISendSysex` for identity) | ✅ Working (input, MIDI 1.0 byte path; UMP receive planned) |
+| Linux | ALSA seq | 🔲 Planned |
 
 ## Building
 

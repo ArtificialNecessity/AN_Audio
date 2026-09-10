@@ -26,6 +26,10 @@ public readonly record struct MidiInput_DeviceTypeId(Guid Value, bool IsUnknownT
     public static MidiInput_DeviceTypeId UnknownFromDriverCaps(string portName, ushort driverManufacturerId, ushort driverProductId)
         => new(StableGuid($"midi-drivercaps|{portName}|{driverManufacturerId}|{driverProductId}"), IsUnknownType: true);
 
+    /// <summary>D31: fallback for backends whose driver reports manufacturer/model as strings (CoreMIDI). Null strings hash as empty.</summary>
+    public static MidiInput_DeviceTypeId UnknownFromDriverStrings(string displayName, string? manufacturer, string? model)
+        => new(StableGuid($"midi-driverstrings|{displayName}|{manufacturer}|{model}"), IsUnknownType: true);
+
     private static Guid StableGuid(string canonical)
     {
         Span<byte> hash = stackalloc byte[32];
@@ -102,10 +106,12 @@ public enum MidiInput_OpenPolicy
 
 public enum MidiInput_HotPlugSource
 {
-    /// <summary>Background thread re-enumerates every <see cref="MidiInput_Options.PollIntervalMs"/> (v1; WinMM has no notification).</summary>
+    /// <summary>Background thread re-enumerates every <see cref="MidiInput_Options.PollIntervalMs"/> (v1; WinMM has no notification). On macOS this ALSO subscribes to CoreMIDI notifications.</summary>
     Poll,
     /// <summary>Sprint 2: host calls <see cref="IMidiInput_DeviceManager.NotifyDeviceChange"/> from its own WM_DEVICECHANGE.</summary>
     HostSupplied,
     /// <summary>Sprint 2: library owns a message-only window on a side thread.</summary>
     LibraryWindow,
+    /// <summary>D34: the OS delivers device change notifications (macOS CoreMIDI). No polling. Windows: not yet supported (throws).</summary>
+    OsNotification,
 }

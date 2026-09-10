@@ -124,6 +124,29 @@ public enum Midi_SysExDeviceId : byte
     AllCall = 0x7F,
 }
 
+/// <summary>Stateless MIDI 1.0 byte-stream facts, for backends that receive raw bytes (CoreMIDI, ALSA) rather than pre-packed messages (WinMM).</summary>
+public static class Midi_Wire
+{
+    /// <summary>
+    /// Total byte length (status included) of the short message that <paramref name="status"/> begins: 1, 2 or 3.
+    /// SysEx (F0/F7) is not a short message and returns 1 (the caller routes it to reassembly). Undefined statuses (F4, F5, F9, FD) return 1.
+    /// </summary>
+    public static int ShortMessageLength(byte status)
+    {
+        if (status < 0xF0)
+        {
+            var kind = (Midi_Status)(status & 0xF0);
+            return kind is Midi_Status.ProgramChange or Midi_Status.ChannelPressure ? 2 : 3;
+        }
+        return (Midi_Status)status switch
+        {
+            Midi_Status.SongPosition => 3,
+            Midi_Status.MtcQuarterFrame or Midi_Status.SongSelect => 2,
+            _ => 1,
+        };
+    }
+}
+
 // ---- UMP / MIDI 2.0 vocabulary (SPEC-30 D25; ground truth _EXTERNAL_APIS/UMP_MIDI2_Format.md) ------------
 
 /// <summary>Which protocol the DEVICE actually sent a message in. Decides which accessor tier of <see cref="MidiInput_Message"/> is native.</summary>

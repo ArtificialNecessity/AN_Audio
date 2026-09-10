@@ -23,6 +23,9 @@ internal sealed class Midi_SysExReassembler
     /// <summary>Messages discarded because they exceeded the cap or were aborted (D20).</summary>
     public long DiscardedCount => _discardedCount;
 
+    /// <summary>True between an F0 and its F7: the next data bytes belong to a SysEx in progress (CoreMIDI packet walker uses this to route data bytes).</summary>
+    public bool InMessage => _inMessage;
+
     /// <summary>
     /// Feed one fragment. Returns true when a complete F0..F7 message is available in <paramref name="complete"/>
     /// (valid until the next call). Fragments of an over-cap message are swallowed until its F7.
