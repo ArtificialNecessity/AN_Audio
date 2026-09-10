@@ -61,12 +61,44 @@ public class Midi_SysExTests
     }
 
     [Fact]
-    public void Rejects_reply_with_no_revision_or_too_many_revision_bytes()
+    public void Rejects_reply_with_no_revision_byte()
     {
         // 1-byte id, family, member, F7 — zero revision bytes
         Assert.False(Midi_IdentityReplyParser.TryParse([0xF0, 0x7E, 0x7F, 0x06, 0x02, 0x41, 0x01, 0x00, 0x02, 0x00, 0xF7], out _));
-        // 1-byte id with 5 revision bytes
-        Assert.False(Midi_IdentityReplyParser.TryParse([0xF0, 0x7E, 0x7F, 0x06, 0x02, 0x41, 0x01, 0x00, 0x02, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0xF7], out _));
+    }
+
+    [Fact]
+    public void Bytes_after_the_fourth_revision_byte_become_the_extension()
+    {
+        // 1-byte id with 4 revision bytes + 1 vendor byte: length-agnostic prefix parse, the 5th byte is NOT a revision byte.
+        Assert.True(Midi_IdentityReplyParser.TryParse([0xF0, 0x7E, 0x7F, 0x06, 0x02, 0x41, 0x01, 0x00, 0x02, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0xF7], out var id));
+        Assert.Equal((uint)(0x01 | (0x02 << 7) | (0x03 << 14) | (0x04 << 21)), id.SoftwareRevision);
+        Assert.Equal(new byte[] { 0x05 }, id.Extension);
+        Assert.Null(id.SerialNumber);   // Roland: no known extension layout
+        // Spec-exact replies carry no extension.
+        Assert.True(Midi_IdentityReplyParser.TryParse(RolandReply, out var roland));
+        Assert.Empty(roland.Extension);
+    }
+
+    // Captured from an Akai MPK mini IV 2026-09-09 (all four of its ports answer identically): 1-byte id 0x47, family 93, member 25,
+    // revision 01 04 01 00, then 00 00 00 00 + ASCII serial "E82605267968110" + 00 — 35 bytes. The old parser rejected it outright.
+    private static readonly byte[] AkaiMpkMiniIvReply = Convert.FromHexString("F07E7F0602475D001900010401000000000045383236303532363739363831313000F7");
+
+    [Fact]
+    public void Parses_Akai_MPK_mini_IV_reply_with_serial_extension()
+    {
+        Assert.True(Midi_IdentityReplyParser.TryParse(AkaiMpkMiniIvReply, out var id));
+        Assert.False(id.Manufacturer.IsExtended);
+        Assert.Equal(0x47, id.Manufacturer.Value);
+        Assert.Equal(93, id.Family);
+        Assert.Equal(25, id.Member);
+        Assert.Equal((uint)(0x01 | (0x04 << 7) | (0x01 << 14)), id.SoftwareRevision);
+        Assert.Equal(20, id.Extension.Length);
+        Assert.Equal("E82605267968110", id.SerialNumber);
+        // The type id is the PREFIX only: a second unit (different serial) is the same model.
+        var other = id with { Extension = [], SerialNumber = "OTHER" };
+        Assert.Equal(MidiInput_DeviceTypeId.FromIdentity(id), MidiInput_DeviceTypeId.FromIdentity(other));
+        Assert.Equal(id, other);
     }
 
     [Fact]

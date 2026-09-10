@@ -36,14 +36,22 @@ public readonly record struct MidiInput_DeviceTypeId(Guid Value, bool IsUnknownT
     public override string ToString() => IsUnknownType ? $"{Value} (unknown type)" : Value.ToString();
 }
 
-/// <summary>Parsed Universal Identity Reply (F0 7E dev 06 02 ...).</summary>
+/// <summary>Parsed Universal Identity Reply (F0 7E dev 06 02 ...). The positional fields are the STANDARD prefix and define the device type
+/// (D11); <see cref="Extension"/> is every byte the device sent after its revision (vendor-specific, empty for spec-exact replies) and
+/// <see cref="SerialNumber"/> its per-manufacturer interpretation when the layout is known (Akai). Equality is by the prefix only.</summary>
 public sealed record MidiInput_DeviceIdentity(
     Midi_ManufacturerId Manufacturer,
     ushort Family,              // 14-bit, LSB first on the wire
     ushort Member,              // 14-bit, LSB first on the wire
     uint SoftwareRevision)      // 4 x 7-bit bytes, vendor-specific layout, packed LSB first
 {
-    public override string ToString() => $"mfr={Manufacturer} family={Family} member={Member} rev={SoftwareRevision:X8}";
+    /// <summary>Vendor bytes after the 4th revision byte, before F7. Empty when the reply is spec-exact.</summary>
+    public byte[] Extension { get; init; } = [];
+    /// <summary>Decoded from <see cref="Extension"/> when the manufacturer's layout is known; null otherwise.</summary>
+    public string? SerialNumber { get; init; }
+    public override string ToString() => $"mfr={Manufacturer} family={Family} member={Member} rev={SoftwareRevision:X8}" + (SerialNumber is null ? Extension.Length == 0 ? "" : $" +{Extension.Length} vendor bytes" : $" serial={SerialNumber}");
+    public bool Equals(MidiInput_DeviceIdentity? other) => other is not null && Manufacturer == other.Manufacturer && Family == other.Family && Member == other.Member && SoftwareRevision == other.SoftwareRevision;
+    public override int GetHashCode() => HashCode.Combine(Manufacturer, Family, Member, SoftwareRevision);
 }
 
 /// <summary>A MIDI input port as seen by the consumer. Immutable snapshot; the library publishes a new record when Identity resolves.</summary>
