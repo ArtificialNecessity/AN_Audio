@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using AN.Audio.Midi.Platforms.Linux;
 using AN.Audio.Midi.Platforms.MacOS;
 using AN.Audio.Midi.Platforms.Windows;
 
@@ -7,8 +8,8 @@ namespace AN.Audio.Midi;
 /// <summary>Factory for the platform-appropriate MIDI input (SPEC-30). Mirrors <see cref="AN.Audio.AudioOutput"/>.</summary>
 public static class MidiInput
 {
-    /// <summary>True where a MIDI input backend exists (Windows/WinMM; macOS/CoreMIDI). Does not guarantee any port is present.</summary>
-    public static bool IsAvailable => RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+    /// <summary>True where a MIDI input backend exists (Windows/WinMM; macOS/CoreMIDI; Linux/ALSA rawmidi). Does not guarantee any port is present.</summary>
+    public static bool IsAvailable => RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX) || RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
 
     /// <exception cref="PlatformNotSupportedException">No backend for this OS.</exception>
     public static IMidiInput Create(MidiInput_Options? options = null)
@@ -18,6 +19,8 @@ public static class MidiInput
             return new WinMm_MidiInput(options);
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             return new CoreMidi_MidiInput(options);
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            return new Alsa_MidiInput(options);
 
         throw new PlatformNotSupportedException($"AN.Audio.Midi has no MIDI input backend for {RuntimeInformation.OSDescription}");
     }
@@ -29,6 +32,8 @@ public static class MidiInput
             return WinMm_MidiInDeviceManager.Instance;
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             return CoreMidi_MidiInDeviceManager.Instance;
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            return Alsa_MidiInDeviceManager.Instance;
         return null;
     }
 }
