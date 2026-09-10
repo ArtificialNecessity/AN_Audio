@@ -98,21 +98,23 @@ while (midi.Ring.TryDequeue(out var m))
 | `MidiInput_MessageRing` | Lock-free SPSC queue filled by the driver thread; grows from `RingInitialCapacity` to `RingMaxCapacity` (default 16384 × 32 B = 512 KB), then drops newest and counts (`DroppedCount`, `LagCount`, `GrowCount`) |
 | `MidiInput_Callback` | Alternative raw delivery on the driver thread (`Start(callback)`); same rules as `AudioCallback` |
 | `MidiInput_DeviceInfo` | `Key` (per-port instance, persist this), `TypeId` (per device model, from SysEx Identity Reply), display `Name`, `Identity` |
-| `IMidiInput_DeviceManager` | Enumerate ports and get `DeviceListChanged` (polled once/second on WinMM, which has no notification) |
+| `IMidiInput_DeviceManager` | Enumerate ports and get `DeviceListChanged` (OS notifications on macOS; polled once/second on Windows and Linux, which offer none without extra services) |
 
 Rules: wire data is never rewritten (a velocity-0 note-on stays a note-on; `IsNoteOff` folds it for you). Control-plane events (`DeviceOpened`, `DeviceLost`, `IdentityResolved`, `SysExReceived`, `Overflow`) fire on a background thread — marshal to UI yourself. Never call `Stop()`/`Dispose()` from inside the raw callback (it throws).
 
 Try it with real hardware:
 
 ```
-cmd\test-midi.cmd
+cmd\test-midi.cmd                                    # Windows
+cmd/test-midi.sh                                     # macOS / Linux
+dotnet run --project tests/SimpleMidiTest -- --captureDuration 30   # capture for 30 s instead of the default 10
 ```
 
 | Platform | MIDI backend | Status |
 |----------|--------------|--------|
 | Windows | WinMM `midiIn*` (works with legacy stack and Windows MIDI Services) | ✅ Working (input; identity request output only) |
 | macOS | CoreMIDI (C API via PInvoke; OS hot-plug notifications; `MIDISendSysex` for identity) | ✅ Working (input, MIDI 1.0 byte path; UMP receive planned) |
-| Linux | ALSA seq | 🔲 Planned |
+| Linux | ALSA rawmidi (`/dev/snd/midiC*D*` via libc, no `libasound`; every USB cable is a port; identity request via the same node) | ✅ Working (input; no driver timestamps — `DeliveryLagMs` reads 0; ALSA sequencer backend planned for that) |
 
 ## Building
 
@@ -148,22 +150,24 @@ AN.Audio/
 │       └── Linux/                   # ALSA output, interop, and device manager
 │   # Each platform also provides a device manager.
 │   # Internal/ contains AudioFormatConverter and SincResampler.
-├── src/AN.Audio.Midi/               # MIDI input (AN.Audio.Midi.dll) — same layout: Internal/, Platforms/Windows/
+├── src/AN.Audio.Midi/               # MIDI input (AN.Audio.Midi.dll) — same layout: Internal/, Platforms/{Windows,MacOS,Linux}/
 │   ├── IMidiInput.cs                # IMidiInput + IMidiInput_DeviceManager
 │   ├── MidiInput_Message.cs         # UMP-word hot-path message (MIDI 1.0 + 2.0 accessors) + MidiInput_Callback
 │   ├── Midi_Wire.cs                 # MIDI 1.0 / UMP / MIDI 2.0 wire vocabulary enums
 │   ├── Midi_RelativeDecode.cs       # stateless encoder-delta decoders (app decides which applies)
 │   ├── MidiInput_MessageRing.cs     # growable SPSC queue (driver thread → your audio thread)
-│   └── Platforms/Windows/           # WinMM midiIn*/midiOut* interop, port, input, device manager
+│   ├── Platforms/Windows/           # WinMM midiIn*/midiOut* interop, port, input, device manager
+│   ├── Platforms/MacOS/             # CoreMIDI client (run loop), port, input, device manager, MIDISendSysex
+│   └── Platforms/Linux/             # ALSA rawmidi via libc (open/poll/read/write/ioctl), enumerator, port, input, device manager
 ├── tests/SimpleAudioTest/           # Standalone console test (plays a WAV file)
-├── tests/SimpleMidiTest/            # Interactive console: list ports, print messages, hot-plug, identity (cmd/test-midi.cmd)
+├── tests/SimpleMidiTest/            # Console smoke test: list ports, print messages, hot-plug, identity; auto-exits (--captureDuration N, default 10 s)
 ├── tests/AN.Audio.Tests/             # Automated tests, including sinc resampling
-├── tests/AN.Audio.Midi.Tests/        # Automated tests: message decode, ring, SysEx, interop layout
+├── tests/AN.Audio.Midi.Tests/        # Automated tests: message decode, ring, SysEx, byte-stream parser, interop layout
 ├── AN.Audio.Build.props             # Shared build infrastructure (timestamp versioning v2)
 └── cmd/
     ├── publish-local.cs / .cmd      # Build + pack + deploy to local feed (cross-platform C# script)
     ├── nuget-publish-audio.cs / .cmd # Build + pack + push to NuGet.org
-    └── test-midi.cmd                # Run the interactive MIDI smoke test
+    └── test-midi.cmd / .sh          # Run the MIDI smoke test
 ```
 
 ## Design Principles

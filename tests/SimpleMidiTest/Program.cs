@@ -6,8 +6,20 @@ using AN.Audio.Midi;
 //   2. opens them all and prints every message (both timestamps)
 //   3. prints hot-plug (opened/lost), identity replies, SysEx, overflow
 //   Keys:  i = re-send Identity Request to all ports   s = stats   q / Enter = quit
+//   Exits automatically after --captureDuration <seconds> (default 10); works with redirected stdin.
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+int captureSeconds = 10;
+for (int a = 0; a < args.Length; a++)
+{
+    if (args[a] is "--captureDuration" or "-d")
+    {
+        if (a + 1 >= args.Length || !int.TryParse(args[a + 1], out captureSeconds) || captureSeconds <= 0)
+        { Console.Error.WriteLine("usage: SimpleMidiTest [--captureDuration <seconds>]"); return 2; }
+        a++;
+    }
+}
 
 if (!MidiInput.IsAvailable)
 {
@@ -72,8 +84,12 @@ var drainThread = new Thread(() =>
 }) { IsBackground = true, Name = "drain" };
 drainThread.Start();
 
-while (true)
+Console.WriteLine($"(auto-exit after {captureSeconds}s; --captureDuration <seconds> to change)");
+var deadline = DateTime.UtcNow.AddSeconds(captureSeconds);
+bool interactive = !Console.IsInputRedirected;
+while (DateTime.UtcNow < deadline)
 {
+    if (!interactive || !Console.KeyAvailable) { Thread.Sleep(50); continue; }
     var key = Console.ReadKey(intercept: true);
     if (key.Key is ConsoleKey.Q or ConsoleKey.Enter or ConsoleKey.Escape) break;
     if (key.Key == ConsoleKey.I)

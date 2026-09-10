@@ -35,7 +35,7 @@ When auditing or citing `3P_*` source, record findings WITH the upstream commit 
 
 - **Language:** C# (`LangVersion=preview`), TFMs `net8.0;net9.0;net10.0` for libraries, `net10.0` for tests. SDK 10.0.x.
 - **OS APIs (direct PInvoke / COM vtables, no wrappers):** Windows WASAPI + MMDevice (`AN.Audio`), WinMM `midiIn*` (`AN.Audio.Midi`);
-  macOS AudioQueue/AudioToolbox; Linux ALSA (`libasound.so.2`). Ground truth for each in `_EXTERNAL_APIS/`.
+  macOS AudioQueue/AudioToolbox, CoreMIDI; Linux ALSA (`libasound.so.2` for PCM; rawmidi `/dev/snd/midiC*D*` via libc for MIDI). Ground truth for each in `_EXTERNAL_APIS/`.
 - **Formats (pure managed, no OS API):** our WAV (incl. RF64/W64, G.711); subsumed SimpleFlac for FLAC; NLayer 3.0.0's `MpegFrameDecoder` for MP3 frames (framing ours).
 - **Analyzers:** `ArtificialNecessity.CodeAnalyzers` (e.g. AN0002: public `const` → `static readonly`) via `AN.Audio.Build.props`.
 - **Tests:** xunit 2.x; `[Trait("Category","Local")]` marks tests that read non-redistributable files and skip when absent.
@@ -47,15 +47,15 @@ When auditing or citing `3P_*` source, record findings WITH the upstream commit 
 AN.Audio.slnx                                 — Solution (slnx format)
 ├── src/AN.Audio.Common/                      — Shared PCM vocabulary ONLY (AudioFormat, SampleFormat, AudioChannelMask, AudioBufferView, AudioSampleConvert)
 ├── src/AN.Audio/                             — PCM output + output-device management (WASAPI / AudioQueue / ALSA)
-├── src/AN.Audio.Midi/                        — MIDI input (WinMM), MIDI 2.0-ready message contract; NO dependency on AN.Audio or Common
+├── src/AN.Audio.Midi/                        — MIDI input (WinMM / CoreMIDI / ALSA rawmidi), MIDI 2.0-ready message contract; NO dependency on AN.Audio or Common
 ├── src/AN.Audio.Formats/                     — Format decoding: IAudioDecoder facade, Wav/, Flac/, (Mp3/ Phase 3); depends only on Common
 ├── tests/AN.Audio.Common.Tests/              — xunit: sample conversion, buffer view, channel mask
 ├── tests/AN.Audio.Tests/                     — xunit: sinc resampler
-├── tests/AN.Audio.Midi.Tests/                — xunit: message decode, ring, SysEx, interop struct layout
+├── tests/AN.Audio.Midi.Tests/                — xunit: message decode, ring, SysEx, byte-stream parser, interop struct layout (WinMM/CoreMIDI self-skip off-OS)
 ├── tests/AN.Audio.Formats.Tests/             — xunit: sniff, PeekableStream, WAV (synthesised), FLAC (fixtures), Local files
 ├── tests/SimpleAudioTest/                    — console smoke: plays a WAV through the real device (manual)
-├── tests/SimpleMidiTest/                     — console smoke: real MIDI ports, hot-plug, identity (manual; cmd/test-midi.cmd)
-├── cmd/                                      — publish-local.cs / nuget-publish-audio.cs (+ .cmd runners), test-midi.cmd
+├── tests/SimpleMidiTest/                     — console smoke: real MIDI ports, hot-plug, identity; auto-exits after --captureDuration (default 10 s) (cmd/test-midi.cmd|.sh)
+├── cmd/                                      — publish-local.cs / nuget-publish-audio.cs (+ .cmd runners), test-midi.cmd / test-midi.sh
 ├── AN.Audio.Build.props                      — imported by EVERY csproj: timestamp versioning v2, analyzers, artifacts/ paths, LocalNuGet deploy target
 ├── AssetSource/cartesia_tts_test.wav         — our WAV master for fixtures
 ├── _SPECS/                                   — design specs (numbered feature areas) + IMPL checklists

@@ -1,16 +1,17 @@
 # SPEC-30 AN.Audio.Midi — cross-platform MIDI input (and the minimal output it needs)
 
-- **Status:** Approved 2026-09-07; Sprint 1 implemented and hardware-validated (see §8 log)
+- **Status:** Approved 2026-09-07. **Input implemented and hardware-validated on Windows (WinMM, §5/§8), macOS (CoreMIDI, §10) and Linux (ALSA rawmidi, §11).** Output (`IMidiOutput`) not started.
 - **Consumers:** MusicStudio `_SPECS/Bringup/17_NoteCapturePath.md` Milestone 1 (sound on keypress, zero config)
-- **Ground truth:** `_EXTERNAL_APIS/WinMM_MidiIn.md` (read from the Windows SDK headers); `_EXTERNAL_APIS/CoreMidi.md` (read from the macOS 15 SDK headers, offsets measured)
+- **Ground truth:** `_EXTERNAL_APIS/WinMM_MidiIn.md` (Windows SDK headers); `_EXTERNAL_APIS/CoreMidi.md` (macOS 15 SDK headers, offsets measured); `_EXTERNAL_APIS/ALSA_RawMidi.md` (kernel rawmidi devices, `/proc`/sysfs layout, `asm-generic` + `sound/asound.h` constants, measured)
 - **Sibling specs:** `10_Audio_Bringup.md`, `20_Audio_Device_Management.md`
 
 - [x] Sprint 1 — Windows/WinMM input: enumerate, open-all, short messages, SysEx Identity Request/Reply, polling hot-plug, ring + raw callback, tests (55 xunit + `SimpleMidiTest` on Akai MPK mini IV)
 - [x] Sprint 1b (2026-09-07) — D24 drop `AN.Audio` dependency; D25 MIDI 2.0-ready `MidiInput_Message` (UMP-word storage, `Protocol`, 64-bit `DriverTimestamp`, two accessor tiers, raw fields internal); D26 `Midi_RelativeDecode` / `Midi_BitScaling`; 109 xunit
 - [ ] Sprint 2 — Hot-plug options: host `WM_DEVICECHANGE` hook; library-owned hidden window on a side thread
 - [ ] Sprint 3 — `IMidiOutput` (full send path: short + SysEx), Windows
-- [ ] Sprint 4a — macOS CoreMIDI input via the C API (`MIDIReadProc`/`MIDIPacketList`), OS hot-plug notifications, Identity Request via `MIDISendSysex` — **spec'd 2026-09-10, §10**
-- [ ] Sprint 4b — macOS UMP receive (`MIDIInputPortCreateWithProtocol`, hand-built block); Linux ALSA-seq (input, then output)
+- [x] Sprint 4a (2026-09-10) — macOS CoreMIDI input via the C API (`MIDIReadProc`/`MIDIPacketList`), OS hot-plug notifications, Identity Request via `MIDISendSysex` — §10, hardware-validated (DJControl Inpulse 500)
+- [x] Sprint 4c (2026-09-10) — Linux ALSA rawmidi input: all substreams as ports, Identity Request via the same node, polling hot-plug — §11, hardware-validated (MPK mini IV, 4 cables); `Midi_ByteStreamParser` + 11 tests; 137 xunit total
+- [ ] Sprint 4b — macOS UMP receive (`MIDIInputPortCreateWithProtocol`, hand-built block); Linux ALSA **sequencer** backend (timestamps, multi-client, udev-free hot-plug; §11 Q1)
 - [ ] Sprint 5 — Android (`android.media.midi`), iOS (CoreMIDI) once AN.Audio itself has those platforms
 - [ ] Later — Windows MIDI Services App SDK / MIDI 2.0 UMP backend behind the same interface (`MidiInput_Message.FromUmp` is the entry point; no consumer change, D25)
 - [ ] Later — MIDI-CI Discovery + Property Exchange `DeviceInfo` (per-unit serial), needs Sprint 3 output; see `_EXTERNAL_APIS/UMP_MIDI2_Format.md` §MIDI-CI
@@ -102,7 +103,7 @@ public static class Midi_RelativeDecode { static int TwosComplement7(byte); stat
 public readonly struct MidiInput_Message
 {
     public long ArrivalTicks { get; }         // Stopwatch.GetTimestamp() at callback entry (D6)
-    public long DriverTimestamp { get; }      // backend-native 64-bit (WinMM: ms since Start; SDK/CoreMIDI: host clock)
+    public long DriverTimestamp { get; }      // driver receipt time in the ArrivalTicks base (D6). WinMM: anchored ms; CoreMIDI: exact mach scale (D36); ALSA rawmidi: == ArrivalTicks, no stamp exists (D39)
     internal uint Word0 { get; } internal uint Word1 { get; }   // UMP words — raw wire is NOT public
     public MidiInput_PortIndex Port { get; }  // byte-sized slot; a UMP backend maps (endpoint, group) → slot
     public Midi_Protocol Protocol { get; }
@@ -131,15 +132,15 @@ public readonly record struct MidiInput_PortIndex(byte Value);
 // ---- SysEx (cold path) --------------------------------------------------------------------
 public sealed class MidiInput_SysExMessage { public long ArrivalTicks { get; init; } public MidiInput_PortIndex Port { get; init; } public ReadOnlyMemory<byte> Bytes { get; init; } /* F0..F7 inclusive */ }
 public sealed record MidiInput_DeviceIdentity(Midi_ManufacturerId Manufacturer, ushort Family, ushort Member, uint SoftwareRevision);
-/// Stable per device TYPE (D11): derived from the Identity Reply (manufacturer, family, member) when available, else a hash of (szPname, wMid, wPid) flagged IsUnknownType.
-public readonly record struct MidiInput_DeviceTypeId(Guid Value, bool IsUnknownType) { static FromIdentity(MidiInput_DeviceIdentity); static UnknownFromDriverCaps(string portName, ushort driverMid, ushort driverPid); }
+/// Stable per device TYPE (D11): derived from the Identity Reply (manufacturer, family, member) when available, else a hash of driver-reported caps/strings flagged IsUnknownType.
+public readonly record struct MidiInput_DeviceTypeId(Guid Value, bool IsUnknownType) { static FromIdentity(MidiInput_DeviceIdentity); static UnknownFromDriverCaps(string portName, ushort driverMid, ushort driverPid) /* WinMM */; static UnknownFromDriverStrings(string displayName, string? manufacturer, string? model) /* D31: CoreMIDI, ALSA */; }
 
 // ---- devices ------------------------------------------------------------------------------
 public readonly record struct MidiInput_DeviceKey(string Value);       // per port INSTANCE, stable across renumbering (D11)
 public sealed record MidiInput_DeviceInfo(MidiInput_DeviceKey Key, MidiInput_DeviceTypeId TypeId, string Name, MidiInput_DeviceIdentity? Identity, bool HasPairedOutput);
 public enum MidiInput_LostReason { Unplugged, InUseByAnotherApplication, DriverError, Stopped }
 public enum MidiInput_OpenPolicy { AllDevices /* default */, PreferenceList, None /* enumerate only */ }
-public enum MidiInput_HotPlugSource { Poll /* v1 */, HostSupplied, LibraryWindow }
+public enum MidiInput_HotPlugSource { Poll /* default on Windows + Linux */, HostSupplied, LibraryWindow /* Windows-only, Sprint 2 */, OsNotification /* D34: macOS default; throws elsewhere */ }
 
 public sealed class MidiInput_Options
 {
@@ -198,7 +199,7 @@ public interface IMidiInput : IDisposable
 public interface IMidiInput_DeviceManager : IDisposable       // singleton per process
 {
     IReadOnlyList<MidiInput_DeviceInfo> GetInputDevices();
-    event Action<DeviceChangeType, MidiInput_DeviceInfo?>? DeviceListChanged;   // DeviceChangeType reused from AN.Audio
+    event Action<MidiInput_DeviceChangeType, MidiInput_DeviceInfo?>? DeviceListChanged;   // MIDI-scoped enum (D24: no AN.Audio dependency)
     void NotifyDeviceChange();                                 // Sprint 2: host-supplied WM_DEVICECHANGE hook
 }
 
@@ -240,7 +241,7 @@ while (midi.Ring.TryDequeue(out var m))
 
 ## 6. Tests (`tests/AN.Audio.Midi.Tests/`, xunit)
 
-As built (55 tests, all passing):
+As built (137 tests, all passing; platform-specific interop tests self-skip off their OS):
 
 - `MidiInput_MessageTests`: kind decode for every status byte (theory), channel nibble, velocity-0 folding (D15), pitch-bend 14-bit LSB-first, struct size == 16 (`Unsafe.SizeOf`).
 - `MidiInput_MessageRingTests`: empty; order + wrap within one segment; fixed-size drop-newest + `DroppedCount` and recovery after drain; **growth** to max with `GrowCount`/`CurrentCapacity`; order across segment boundaries under random interleaving (bounded by the `Max − Initial` guarantee, D23); grown ring reuses segments with no further growth; steady-state zero allocations (1e6 ops); real two-thread producer/consumer 500k messages in order; `LagCount` independent of `DroppedCount`; invalid capacities throw.
@@ -367,7 +368,7 @@ public readonly record struct MidiInput_DeviceTypeId { static UnknownFromDriverS
 - **Delivery lag 0.02–0.03 ms** (CoreMIDI receive thread → our callback), ns resolution — vs. ~1 ms quantised on WinMM.
 - **Finding → D36 amended:** first layout-test run showed `Stopwatch.GetTimestamp()` ≠ `mach_absolute_time()`; probe confirmed Stopwatch is the same clock in **nanoseconds** (× 125/3 here). Conversion is now an exact scale; the identity assumption is gone.
 - **Finding → interop:** `MIDISysexSendRequest` is declared AFTER the header's `#pragma pack(pop)`, so it is naturally aligned (40 bytes, `data@8`); the first draft's `Pack = 4` gave 36. Layout tests caught it before any send.
-- Implementation note: `CoreMidi_MidiInput` duplicates ~250 lines of `WinMm_MidiInput` (slot table, worker loop, SysEx/identity drains). A shared `Internal/MidiInput_PortTable` base was deferred because the Windows side cannot be re-tested from this machine; revisit when both backends are buildable in one CI run.
+- Implementation note: `CoreMidi_MidiInput` duplicates ~250 lines of `WinMm_MidiInput` (slot table, worker loop, SysEx/identity drains). `Alsa_MidiInput` (§11) is a third copy. A shared `Internal/MidiInput_PortTable` base is the obvious refactor; it is deferred until all three backends can be exercised in one CI run (each currently needs its own machine).
 
 ### 10.6 Open questions (macOS)
 
@@ -375,3 +376,59 @@ public readonly record struct MidiInput_DeviceTypeId { static UnknownFromDriverS
 - **Q2:** Virtual endpoints (IAC / network) — enumerate and open them under `AllDevices` (they are legitimate sources, e.g. from a DAW), or exclude by `kMIDIPropertyDriverOwner`? Proposed: include; consumers filter by `Name`/`Key`.
 - **Q3:** Should `CoreMidi_Client` also be exposed as an opt-in `MidiInput_Options.RunLoopThread = Host` for apps that already own the main `CFRunLoop` (FluidUI on macOS)? Proposed: not in 4a; the dedicated thread is always correct, merely one extra thread.
 - **Q4:** Minimum macOS. .NET 8 requires macOS 12+, so every API here (incl. UMP, 11.0) is always present; no runtime version gating needed. Confirm we do not target `net8.0-macos`-style TFMs (we do not — plain `net8.0`/`net9.0`/`net10.0`, AnyCPU).
+
+## 11. Linux implementation (`Platforms/Linux/`, Sprint 4c) — implemented and hardware-validated 2026-09-10
+
+- **Ground truth:** `_EXTERNAL_APIS/ALSA_RawMidi.md` (kernel rawmidi char devices, `/proc/asound`, sysfs; constants from `asm-generic` headers; measured on this machine)
+- **Status:** Working. Hardware: Akai MPK mini IV (USB, 4 input / 5 output substreams on one rawmidi device — all 4 input cables exposed as ports)
+
+### 11.1 Decisions
+
+| # | Decision | Choice | Rationale |
+|---|---|---|---|
+| D39 | Linux backend | **ALSA rawmidi character devices** (`/dev/snd/midiC{card}D{dev}`) via five libc calls (`open`/`poll`/`read`/`write`/`close`, `[LibraryImport("libc")]`). **No `libasound`**, no sequencer. Bytes are decoded by `Internal/Midi_ByteStreamParser` (running status, interleaved real-time, system common, SysEx staged into `Midi_SysExReassembler`) → `MidiInput_Message.FromMidi1`. **Rawmidi has no timestamps: `DriverTimestamp == ArrivalTicks`** (the stamp taken after `read()` returns), so `DeliveryLagMs` is 0 by construction on this backend — documented on the property; consumers wanting real stamps need the sequencer backend (Q1). | The package's premise is zero native dependencies; rawmidi is a byte pipe the kernel exposes directly, so the only interop is libc. The ALSA sequencer has better semantics (multi-client, stamps, hot-plug events, all substreams) but is a 28-byte-union + many-ioctl surface to measure and test — the right upgrade when `IMidiOutput` lands, not the right first step. |
+| D40 | Device key on Linux | `alsa-serial:{usbSerial}|{name}|D{dev}` when the card's parent USB device has an iSerial (`/sys/class/sound/cardN/device/../serial`), else `alsa:{cardId}|{name}|D{dev}`; **ordinal suffix `#n` for duplicates** of the same base key (D11 rule). Card and device numbers are never exposed — they renumber on every replug. | Verified: card 2 → card 1 across one replug. The iSerial is the per-unit identity WinMM/CoreMIDI cannot give us (the MPK's iSerial equals the serial in its Identity Reply extension). |
+| D41 | Paired output / Identity Request | **Same node, opened `O_RDWR`, same substream index in both directions** (`HasPairedOutput = sub < outputCount`) when `/proc/asound/cardN/midiD` lists an `Output` section (`HasPairedOutput = true`); the 6-byte request is `write()`n to the fd. No name matching, no second handle. Falls back to `O_RDONLY` if the R/W open fails (`CanWrite = false`, no request). D9 silence-on-failure semantics unchanged. | Rawmidi pairs input and output substream 0 structurally in one device node — simpler than both other backends. |
+| D42 | Exclusivity on Linux | `open()` → `EBUSY` (16) → `DeviceLost(InUseByAnotherApplication)` once, retried only after the device changes (D16). Any other `errno` → `DriverError`. `EACCES` is a permissions problem: nodes are `root:audio 0660` **plus a logind `uaccess` ACL for the seated user**, so `audio` group membership is only needed for headless/SSH sessions (verified with `getfacl`). | Rawmidi substreams are single-client (unlike the sequencer); `amidi`/`aseqdump` will collide with us, PipeWire/JACK will not. |
+| D43 | Hot-plug on Linux | `MidiInput_HotPlugSource.Poll` (default): the worker re-globs `/dev/snd/midiC*D*` every `PollIntervalMs` and diffs by key. Additionally the per-port reader thread sees `POLLERR|POLLHUP` on unplug and reports `Unplugged` immediately. `OsNotification` is **not** implemented on Linux (would be `libudev` netlink monitor; throws `PlatformNotSupportedException`); `HostSupplied`/`LibraryWindow` are Windows-only. | I4 exception, same as WinMM: the kernel offers no rawmidi arrival event without udev. |
+| D44 | Substreams | **Every input substream is a port.** `/proc/asound/cardN/midiD` lists `Input i` / `Output i` sections; the enumerator emits one entry per input substream (name `{name}` for cable 1, `{name} [i+1]` after — WinMM's `MIDIIN2 (…)` convention), key suffix `D{dev}S{sub}`. Before each `open()` the port issues `SNDRV_CTL_IOCTL_RAWMIDI_PREFER_SUBDEVICE` (`_IOW('U', 0x42, int)` = `0x40045542`, verified against `sound/asound.h`) on `/dev/snd/controlC{N}` — **always, including for substream 0**, because the kernel default is "first free" and would hand cable 1 to whichever port opened first. The prefer→open pair runs under a process-wide lock. If `controlC{N}` cannot be opened, substream 0 still opens by default and the others fail with `DriverError`. | The MPK mini IV has `Input 0..3` / `Output 0..4` on one node; without this the Linux backend showed one port where WinMM shows four. Verified: all four enumerate, open, and each answers the Identity Request. | |
+| D45 | Thread model | One **reader thread per open port** (`poll(100 ms)` → non-blocking `read` → parse) plus the shared worker thread (rescan, SysEx dispatch, identity, overflow) exactly as WinMM/CoreMIDI. `IsInsideCallback` is set on the reader thread while parsing (D14). `Close()` sets a flag and joins the reader (≤ 100 ms). | A blocking `read()` cannot be interrupted portably from managed code; `poll` with a timeout is the shutdown primitive. One thread per port is the honest rawmidi shape (one fd each); the sequencer would collapse this to one. |
+
+### 11.2 Files
+
+| File | Contents |
+|---|---|
+| `Alsa_Interop.cs` | `[LibraryImport("libc")]` `Open`/`Close`/`Read`/`Write`/`Poll`; `Ioctl`; `PollFd` (8 bytes); `O_*`, `POLL*`, `EAGAIN`, `SNDRV_CTL_IOCTL_RAWMIDI_PREFER_SUBDEVICE` constants. **No literal constants outside this file (D12).** |
+| `Alsa_MidiInEnumerator.cs` | Globs `/dev/snd/midiC*D*`; reads name + Input/Output substream counts from `/proc/asound/cardN/midiD`, card id and USB serial from sysfs → `Alsa_MidiInDeviceEntry` (path, card, device, name, `Key` per D40, fallback `TypeId` via `UnknownFromDriverStrings(name, cardId, null)` (D31), `HasPairedOutput`). Output-only devices are skipped. Shared by input and device manager. |
+| `Alsa_MidiInPort.cs` | One open fd: `Open(out reason)` (R/W then R/O, D41/D42), reader thread (D45), implements `IMidi_ByteStreamSink` → `FromMidi1(arrival, arrival, …)` / `QueueSysExFromDriver`; `TryWrite` under a lock for the identity request; `Close()`. |
+| `Alsa_MidiInput.cs` | `IMidiInput`: same shape as `WinMm_MidiInput` (256-slot table, worker loop, `_failedKeys`, SysEx/identity drains, overflow reporting). Identity requests go to `port.TryWrite` instead of a separate sender. |
+| `Alsa_MidiInDeviceManager.cs` | `IMidiInput_DeviceManager` singleton, 1 s poller started on first subscription, `NotifyDeviceChange()` wakes it. Same shape as WinMM. |
+| `Internal/Midi_ByteStreamParser.cs` | Platform-neutral stateful MIDI 1.0 byte-stream parser + `IMidi_ByteStreamSink`. Allocation-free after construction. Used by the ALSA port; **candidate to replace `CoreMidi_MidiInPort.ParsePacketBytes`** (which is the same state machine minus running status) once the macOS side can be re-tested. |
+| `MidiInput.cs` (root) | `IsAvailable` includes `OSPlatform.Linux`; `Create` / `GetDeviceManager` branch to `Alsa_*`. |
+
+### 11.3 Public API deltas
+
+None. `MidiInput_Options.EnableIoStatus`, `SysExBuffersPerPort` are ignored on Linux; `SysExBufferBytes` sizes the parser's SysEx stage (fragments handed to the reassembler). `IdentityReplyTimeoutMs` is unused (the write is synchronous; the reply arrives whenever it arrives).
+
+### 11.4 Tests
+
+- `Midi_ByteStreamParserTests` (11, platform-neutral): explicit status; running status incl. velocity-0 NoteOn as received (D15); real-time bytes inside a message and inside SysEx; system common 0/1/2-byte lengths and running-status cancel; stray data dropped; SysEx over the stage size flushed as fragments and reassembled; over-cap SysEx discarded + counted + recovery (D20); status byte inside SysEx aborts it **and is counted** (found by the test: bytes still in the stage were being dropped uncounted); `Reset()`; **chunk-boundary independence** (1 byte per `Feed` ≡ one shot).
+- No Linux-only layout tests: the only native struct is `pollfd` (8 bytes, `int`+`short`+`short`), constants are asserted by inspection of `asm-generic`.
+- `tests/SimpleMidiTest` unchanged; `cmd/test-midi.sh` runs it.
+
+### 11.5 Hardware log (2026-09-10, Akai MPK mini IV, Ubuntu / kernel 6.x, x86-64, .NET 10)
+
+- Enumerated 1 port: `MPK mini IV`, `HasPairedOutput = true`, key `alsa:IV|MPK mini IV|D0` on the first run (serial lookup added after; now `alsa-serial:E82605267968110|MPK mini IV|D0`).
+- `Start()` opened it R/W; Identity Request written; **Identity Reply received** through reader → parser → reassembler → `Midi_IdentityReplyParser`: `mfr=47 family=93 member=25 rev=00004201 serial=E82605267968110` (35 bytes, the Akai extension layout) — `TypeId` upgraded from the D31 string hash to the identity GUID.
+- Interactive: NoteOn/NoteOff on ch1 with correct 7-bit and Min-Center-Max 16-bit velocities (`105/54093`); the device sends real `0x80` NoteOff and full status bytes, so running status was not exercised by this hardware (covered by unit tests instead).
+- `lag = 0.00 ms` on every message — by construction (D39), not a measurement.
+- `[lost:Stopped]` on `Stop()`; no exceptions across open → read → write → close. Replug moved the device from card 2 to card 1 (D40 rationale).
+- **Finding → D44:** `/proc/asound/card1/midi0` lists `Input 0..3` / `Output 0..4` — four cables behind one node; the first build showed one port. After the prefer-subdevice ioctl: 4 ports enumerate (`MPK mini IV`, `… [2]`, `… [3]`, `… [4]`), all four open, and **each cable answers its own Identity Request** (four `[identity]` events, same serial).
+- **Finding → D42:** `getfacl /dev/snd/midiC1D0` shows `user:jeske:rw-` from logind; the user is not in `audio` and did not need to be.
+
+### 11.6 Open questions (Linux)
+
+- **Q1 — sequencer backend.** `/dev/snd/seq` gives kernel timestamps (real `DeliveryLagMs`), multi-client access (no `EBUSY` collisions with `amidi`), port announce events (no polling), and every substream as a port. Proposed: implement as `Platforms/Linux/AlsaSeq_*` alongside rawmidi when Sprint 3 (`IMidiOutput`) reaches Linux, then make it the default and keep rawmidi as the zero-ioctl fallback.
+- **Q2 — substreams `> 0` on rawmidi (D44).** **Resolved — implemented in D44** (the prefer-subdevice ioctl). The remaining race — another process opening the node between our `prefer` and `open` — is inherent to the rawmidi API and would surface as the wrong cable; the sequencer (Q1) has no such race.
+- **Q3 — udev hot-plug.** `libudev` P/Invoke would make `OsNotification` real on Linux. The 1 s poll is adequate for spec 17's "plug in and play"; revisit if battery/CPU on a laptop matters.
+- **Q4 — UMP rawmidi (kernel 6.5+, `/dev/snd/umpC*D*`).** Word stream → `FromUmp` directly (D25). Needs a MIDI 2.0 device.

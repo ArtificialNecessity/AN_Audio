@@ -29,7 +29,7 @@ operating system's audio stack.
 | PCM output | `IAudioOutput` / `AudioOutput` | ✅ WASAPI shared, event-driven | ✅ AudioQueue | ✅ ALSA | ◻ AAudio | ◻ AudioQueue | `10_Audio_Bringup.md` |
 | Output device mgmt | `IAudioDeviceManager` | ✅ MMDevice + `IMMNotificationClient` | ✅ property listeners | ✅ hints + reactive loss | ◻ | ◻ | `20_Audio_Device_Management.md` |
 | PCM **input (capture)** | `IAudioInput` / `AudioInput` | ◻ WASAPI capture | ◻ AudioQueue input | ◻ ALSA capture | ◻ AAudio | ◻ | **TBD `40_Audio_Capture.md`** |
-| **MIDI input** | `IMidiInput` / `MidiInput` | ✅ WinMM `midiIn*` (Sprint 1, hardware-validated) | ◻ CoreMIDI | ◻ ALSA seq | ◻ `android.media.midi` | ◻ CoreMIDI | `30_MidiInput.md` |
+| **MIDI input** | `IMidiInput` / `MidiInput` | ✅ WinMM `midiIn*` | ✅ CoreMIDI (C API, OS hot-plug) | ✅ ALSA rawmidi (libc only; seq backend planned for timestamps) | ◻ `android.media.midi` | ◻ CoreMIDI | `30_MidiInput.md` §5 / §10 / §11 |
 | **MIDI output** | `IMidiOutput` / `MidiOutput` | ◻ WinMM `midiOut*` (Sprint 3) | ◻ CoreMIDI | ◻ ALSA seq | ◻ | ◻ | `30_MidiInput.md` §Sprint 3 (own spec when started) |
 | MIDI device mgmt | `IMidiInput_DeviceManager` | ✅ 1 s poll + `NotifyDeviceChange()` host hook; library `WM_DEVICECHANGE` window in Sprint 2 | ◻ `MIDINotifyProc` | ◻ seq announce port | ◻ | ◻ | `30_MidiInput.md` |
 | MIDI 2.0 / UMP | same interfaces, richer message struct | ◻ Windows MIDI Services SDK | ◻ CoreMIDI UMP | ◻ ALSA UMP | ◻ | ◻ | later |

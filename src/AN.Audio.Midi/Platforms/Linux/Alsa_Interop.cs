@@ -21,6 +21,12 @@ internal static partial class Alsa_Interop
 
     public const int EAGAIN = 11;
 
+    /// <summary>SNDRV_CTL_IOCTL_RAWMIDI_PREFER_SUBDEVICE = _IOW('U', 0x42, int) (sound/asound.h). Issued on /dev/snd/controlC{N}
+    /// immediately before open()ing midiC{N}D{D} to select a substream other than 0. Value verified against the header 2026-09-10.</summary>
+    public const nuint SNDRV_CTL_IOCTL_RAWMIDI_PREFER_SUBDEVICE = 0x40045542;
+    /// <summary>Pass as the preferred subdevice to restore the kernel default (first free).</summary>
+    public const int PreferAnySubdevice = -1;
+
     [StructLayout(LayoutKind.Sequential)]
     public struct PollFd
     {
@@ -43,6 +49,9 @@ internal static partial class Alsa_Interop
 
     [LibraryImport("libc", EntryPoint = "poll", SetLastError = true)]
     public static unsafe partial int Poll(PollFd* fds, nuint nfds, int timeoutMs);
+
+    [LibraryImport("libc", EntryPoint = "ioctl", SetLastError = true)]
+    public static unsafe partial int Ioctl(int fd, nuint request, int* arg);
 }
 
 #pragma warning restore AN0100
