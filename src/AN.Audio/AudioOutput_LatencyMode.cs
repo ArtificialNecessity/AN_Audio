@@ -33,6 +33,10 @@ public enum AudioOutput_LatencyFallbackReason
     /// <summary>Exclusive mode refused: another application holds the endpoint, the user disabled exclusive access in Sound settings, or no exclusive-capable
     /// format was found (<c>AUDCLNT_E_DEVICE_IN_USE</c> / <c>AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED</c> / <c>AUDCLNT_E_UNSUPPORTED_FORMAT</c>). Fell back to shared.</summary>
     ExclusiveRefused = 6,
+    /// <summary>Spec 70 D2: <see cref="AudioOutput_Backend.Asio"/> was requested but no ASIO driver is registered (or the requested one failed to load); WASAPI was used.</summary>
+    BackendUnavailable = 7,
+    /// <summary>Spec 70 D6 (informational): the ASIO driver refused the consumer's sample rate (external clock or unsupported), so its current rate was adopted and we resample.</summary>
+    DriverRateAdopted = 8,
     Unknown = 99,
 }
 

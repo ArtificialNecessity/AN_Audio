@@ -1,6 +1,6 @@
 # 70 — ASIO output backend (Windows)
 
-- **Status:** DRAFT 2026-09-13. Not started. Depends on `71_CHeader_Bindings_Autogen.md` for every struct/enum/vtable declaration.
+- **Status:** Phases 1–2 **BUILT 2026-09-13**, hardware-validated on the MOTU M4 (§7.2). Phases 3–4 pending. Depends on `71_CHeader_Bindings_Autogen.md` (BUILT) for every struct/enum/vtable declaration.
 - **Parent:** `00_AN_Audio_Overview.md`; extends `60_Low_Latency_Output.md` (whose §1 listed ASIO as a non-goal — amended by D1 below);
   device semantics from `20_Audio_Device_Management.md`.
 - **Ground truth:** Steinberg ASIO SDK 2.3.x at `C:\PROJECTS\3P_ASIOSDK` (`common/asiosys.h`, `common/asio.h`, `common/iasiodrv.h`), read
@@ -47,10 +47,11 @@ hosting the driver's control panel inside our UI (we can *open* it — `controlP
 - **D5 — Buffer size = the driver's `preferredSize`.** ASIO buffer size is driver-global (M-Series panel), not per-client. `getBufferSize` → use
   `preferred`; never request another value. `PeriodFrames = preferred`. `BufferSizeMs` is ignored; `Latency` mode is informational:
   `LatencyModeActual = LowLatency` always (ASIO has no "default" path), `StreamProcessingActual = Raw` (no APO chain by construction).
-- **D6 — Sample rate: try the consumer's, else adopt the driver's.** `canSampleRate(consumer.SampleRate) == ASE_OK` → `setSampleRate` (this
-  changes the device for every app — documented); refused (`ASE_NoClock`/`ASE_InvalidMode`, external clock) or `setSampleRate` fails →
-  `getSampleRate()` and resample through `AudioFormatConverter` with `LatencyFallbackReason.DriverRateAdopted` (new member, informational).
-  Order is fixed by the SDK: `setSampleRate` BEFORE `createBuffers`. `sampleRateDidChange` at runtime → treated as `kAsioResetRequest`.
+- **D6 — Sample rate: adopt the driver's by default; switching the device is opt-in** (amended 2026-09-13 after listening: the first
+  version tried `setSampleRate(consumer rate)` first, and the M4 **mutes its outputs for 1–2 s while its clock relocks** — the head of a
+  44.1 k voice sample was lost). `AudioOutputOptions.Asio_SampleRate : Asio_SampleRatePolicy { AdoptDriverRate (default), SetDeviceRate }`.
+  Default: `getSampleRate()` and resample through `AudioFormatConverter` (sinc), reported as `LatencyFallbackReason.DriverRateAdopted` (informational).
+  `SetDeviceRate`: `canSampleRate` → `setSampleRate` BEFORE `createBuffers` (SDK order); refusal → adopt. `sampleRateDidChange` at runtime → treated as `kAsioResetRequest`.
 - **D7 — Channel types are per channel; read them.** `getChannelInfo` for each wanted output; supported `Asio_SampleType`: `Int32LSB` (M4),
   `Int16LSB`, `Int24LSB`, `Float32LSB`, `Float64LSB`. Anything else (MSB variants, `Int32LSBnn`, DSD) → `NotSupportedException` at open naming
   the channel and type. Mixed types across the used channels are allowed (per-channel converter selection).
@@ -142,13 +143,13 @@ tests/SimpleAudioTest/Program.cs                 --asio [--asio-driver "MOTU M S
 
 ## 6. Phases
 
-- [ ] **Phase 0 — spec 71 P0–P4** (generated declarations + probe green on this box).
-- [ ] **Phase 1 — Enumeration + host**: `Asio_DriverRegistry`, `AsioDeviceManager`, `Asio_DriverHost` up to `init(hwnd)` + `getDriverName/Version`,
+- [x] **Phase 0 — spec 71 P0–P4** (generated declarations + probe green on this box).
+- [x] **Phase 1 — Enumeration + host**: `Asio_DriverRegistry`, `AsioDeviceManager`, `Asio_DriverHost` up to `init(hwnd)` + `getDriverName/Version`,
       `getChannels`, `getBufferSize`, `getLatencies`, `getChannelInfo`; `SimpleAudioTest --asio --probe` prints them for the M4. No audio yet.
-- [ ] **Phase 2 — Output**: `createBuffers` (outputs), callbacks table, `Asio_PlanarWriter`, `AsioAudioOutput` Start/Stop/Dispose, D5–D9, D11, D12.
+- [x] **Phase 2 — Output**: `createBuffers` (outputs), callbacks table, `Asio_PlanarWriter`, `AsioAudioOutput` Start/Stop/Dispose, D5–D9, D11, D12.
       440 Hz tone for 10 s on the M4: record `PeriodFrames`, `LatencyMs`, `UnderrunCount` in §7.
-- [ ] **Phase 3 — Reset/loss**: D13 (change buffer size in the M-Series panel while playing → seamless re-create; unplug → `DeviceLost`), D14.
-- [ ] **Phase 4 — Wiring + docs**: D2 in `AudioOutput.Create`, D3 manager overload, README (backend table row, trademark line §7), spec 60 §1/§9
+- [ ] **Phase 3 — Reset/loss**: D13 is coded (`RequestReset`), NOT yet exercised: change buffer size in the M-Series panel while playing → seamless re-create; unplug → `DeviceLost`. D14.
+- [ ] **Phase 4 — Docs/consumers**: D2/D3 wiring is done (`AudioOutput.Create`, `GetDeviceManager(backend)`); pending: README (backend table row, trademark line §7), spec 60 §1/§9
       amendment, overview I1 note + matrix row, `_PROJECT_STRUCTURE.md`. MusicStudio opts in via `MUSICSTUDIO_AUDIO_BACKEND=asio`.
 
 ## 7. Verification / measurements
@@ -164,6 +165,19 @@ tests/SimpleAudioTest/Program.cs                 --asio [--asio-driver "MOTU M S
 | latency | `getLatencies` in 177 / **out 166 frames = 3.46 ms** at 128 (same before/after createBuffers) |
 | `outputReady` | `ASE_NotPresent` — unsupported (D9 probe-once confirmed) |
 | run | 1 s → 375 `bufferSwitch` = 48000/128 exactly; driver asked `kAsioSupportsTimeInfo` during `createBuffers`; stop/dispose/Release clean |
+
+### 7.2 Phase 2 through the real backend — MOTU M4, panel at default (128), 2026-09-13
+
+`SimpleAudioTest --asio [--tone] [--asio-offset 2]`, consumer Int16, `Backend = Asio`, listened to on Out 1/2 and Out 3/4:
+
+| case | device format | `PeriodFrames` | `LatencyMs` (= `outputLatency`) | underruns | heard |
+|---|---|---|---|---|---|
+| 440 Hz tone, 48 k stereo, 10 s | 48000 / 2 / Int32 | 128 = 2.67 ms | **3.46** | 0 | clean, immediate start |
+| voice WAV 44.1 k mono, **first version of D6 (setSampleRate 44100)** | 44100 / 1 / Int32 | 128 = 2.90 ms | 3.8 | 0 | **head clipped ~1–2 s** — M4 relock mute → D6 amended |
+| 440 Hz tone 48 k while the device sat at 44.1 k, **AdoptDriverRate** | 44100 / 2 / Int32, `DriverRateAdopted` | 128 | 3.8 | 0 | clean, immediate start (user-confirmed) |
+| tone, `--asio-offset 2` | 48000 / 2 / Int32 | 128 | 3.46 | 0 | Out 3/4 |
+
+Also fixed on the way: `SimpleAudioTest --volume` was parsed and never applied (played at unity); default is now 0.25.
 
 - Unit as in §5; hardware: `SimpleAudioTest --asio` on the M4 at panel sizes 32/64/128/256 — table of `PeriodFrames`, `LatencyMs`
   (`outputLatency`), `UnderrunCount` after 10 s, to be recorded here (mirrors 60 §4.1).

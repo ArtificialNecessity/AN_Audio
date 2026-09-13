@@ -122,6 +122,12 @@ internal sealed unsafe class WasapiAudioOutput : IAudioOutput
     {
     }
 
+    /// <summary>Spec 70 D2: the consumer asked for <see cref="AudioOutput_Backend.Asio"/> but no driver was available; this WASAPI stream is the fallback.</summary>
+    internal void MarkBackendUnavailable()
+    {
+        if (_fallbackReason == AudioOutput_LatencyFallbackReason.None) _fallbackReason = AudioOutput_LatencyFallbackReason.BackendUnavailable;
+    }
+
     // ── Device Resolution ────────────────────────────────────────────────────────
 
     /// <summary>

@@ -36,4 +36,28 @@ public sealed class AudioOutputOptions
     /// Spec 60: bypass the endpoint's system effects chain (Windows RAW mode). Default: <see cref="AudioOutput_StreamProcessing.SystemEffects"/>.
     /// </summary>
     public AudioOutput_StreamProcessing Processing { get; set; } = AudioOutput_StreamProcessing.SystemEffects;
+
+    /// <summary>
+    /// Spec 70 D2: which Windows audio stack to use. Default <see cref="AudioOutput_Backend.Auto"/> = WASAPI unless an <c>asio:</c> device id is
+    /// selected through <see cref="PreferredDevices"/>. Ignored on macOS/Linux.
+    /// </summary>
+    public AudioOutput_Backend Backend { get; set; } = AudioOutput_Backend.Auto;
+
+    /// <summary>
+    /// Spec 70 D4 (ASIO only): a window the driver's control panel dialog should be owned by. Null = AN.Audio's own hidden host window.
+    /// The driver is always initialised with AN.Audio's window; this only affects dialog ownership.
+    /// </summary>
+    public AudioOutput_NativeWindowHandle? Asio_OwnerWindow { get; set; }
+
+    /// <summary>
+    /// Spec 70 D8 (ASIO only): first hardware output channel to render to. Default 0 = <c>Out 1</c>; 2 targets <c>Out 3/4</c> on a 4-out interface.
+    /// Consumer channels beyond the driver's outputs are dropped.
+    /// </summary>
+    public Asio_ChannelIndex Asio_OutputChannelOffset { get; set; } = new(0);
+
+    /// <summary>
+    /// Spec 70 D6 (ASIO only): keep the device clock and resample (default), or switch the device to the consumer's rate. Switching mutes the
+    /// outputs while the hardware relocks (measured 1–2 s on the MOTU M4) and changes the rate for every other application.
+    /// </summary>
+    public Asio_SampleRatePolicy Asio_SampleRate { get; set; } = Asio_SampleRatePolicy.AdoptDriverRate;
 }

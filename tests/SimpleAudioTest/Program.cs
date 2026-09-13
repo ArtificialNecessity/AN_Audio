@@ -14,11 +14,12 @@ internal static class Program
     static int Main(string[] args)
     {
         // Parse args: [wavPath] [--duration <seconds>] [--low-latency] [--raw]   (spec 60 §4 / §8)
+        //             [--asio] [--asio-driver <name|asio:{CLSID}>] [--asio-offset N] [--asio-probe] [--tone]   (spec 70 §5)
         string wavPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "AssetSource", "cartesia_tts_test.wav");
         double? durationSeconds = null;
-        bool lowLatency = false, exclusive = false, raw = false, probeAll = false;
-        string? deviceId = null;
-        float volume = 0.3f; // --volume 0..1; the fixture is LOUD at unity
+        bool lowLatency = false, exclusive = false, raw = false, probeAll = false, asio = false, asioProbe = false, tone = false;
+        string? deviceId = null, asioDriver = null; int asioOffset = 0;
+        float volume = 0.25f; // --volume 0..1; the fixture is LOUD at unity
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -32,6 +33,11 @@ internal static class Program
             else if (args[i] == "--raw") raw = true;
             else if (args[i] == "--probe-all") probeAll = true; // open EVERY render endpoint in LowLatency and report the period it grants
             else if (args[i] == "--device" && i + 1 < args.Length) deviceId = args[++i];
+            else if (args[i] == "--asio") asio = true;
+            else if (args[i] == "--asio-driver" && i + 1 < args.Length) { asio = true; asioDriver = args[++i]; }
+            else if (args[i] == "--asio-offset" && i + 1 < args.Length) asioOffset = int.Parse(args[++i]);
+            else if (args[i] == "--asio-probe") { asio = true; asioProbe = true; } // list drivers, open the chosen one, print its facts, exit
+            else if (args[i] == "--tone") tone = true; // 440 Hz sine instead of the WAV (clean measurement signal)
             else if (!args[i].StartsWith("--"))
             {
                 wavPath = args[i];
@@ -40,13 +46,37 @@ internal static class Program
 
         wavPath = Path.GetFullPath(wavPath);
 
-        if (!File.Exists(wavPath))
+        if (!tone && !asioProbe && !File.Exists(wavPath))
         {
             Console.Error.WriteLine($"WAV file not found: {wavPath}");
             return 1;
         }
 
-        Console.WriteLine($"Loading: {wavPath}");
+        if (asio)
+        {
+            var asioManager = AudioOutput.GetDeviceManager(AudioOutput_Backend.Asio);
+            var drivers = asioManager?.GetOutputDevices() ?? [];
+            Console.WriteLine($"ASIO drivers ({drivers.Count}):");
+            foreach (var d in drivers) Console.WriteLine($"  {d.DisplayName,-40} {d.Id}");
+            if (drivers.Count == 0) { Console.Error.WriteLine("No ASIO driver registered for this process bitness."); return 1; }
+            var chosen = asioDriver is null ? drivers[0]
+                : drivers.FirstOrDefault(d => string.Equals(d.Id, asioDriver, StringComparison.OrdinalIgnoreCase) || d.DisplayName.Contains(asioDriver, StringComparison.OrdinalIgnoreCase))
+                  ?? throw new ArgumentException($"no ASIO driver matches '{asioDriver}'");
+            deviceId = chosen.Id;
+            Console.WriteLine($"Using: {chosen.DisplayName} ({chosen.Id}), output offset {asioOffset}");
+        }
+
+        if (asioProbe)
+        {
+            using var probe = AudioOutput.Create(new AudioFormat(48000, 2, SampleFormat.Float32),
+                new AudioOutputOptions { Backend = AudioOutput_Backend.Asio, PreferredDevices = [deviceId!], Asio_OutputChannelOffset = new(asioOffset) });
+            Console.WriteLine($"Device format: {probe.DeviceFormat.SampleRate} Hz, {probe.DeviceFormat.Channels} ch, {probe.DeviceFormat.Format}");
+            Console.WriteLine($"Period: {probe.PeriodFrames} frames = {probe.PeriodFrames * 1000.0 / probe.DeviceFormat.SampleRate:F2} ms   LatencyMs (outputLatency): {probe.LatencyMs:F2}");
+            Console.WriteLine($"Mode: {probe.LatencyModeActual}/{probe.StreamProcessingActual}   fallback: {probe.LatencyFallbackReason}   device: {probe.CurrentDevice}");
+            return 0;
+        }
+
+        if (!tone) Console.WriteLine($"Loading: {wavPath}");
 
         if (probeAll)
         {
@@ -65,8 +95,8 @@ internal static class Program
         }
 
         // Parse WAV and load all PCM data into memory (pre-allocated)
-        var wav = WavReader.Load(wavPath);
-        Console.WriteLine($"WAV: {wav.SampleRate}Hz, {wav.Channels}ch, {wav.BitsPerSample}bit, {wav.PcmData.Length} bytes ({wav.DurationSeconds:F2}s)");
+        var wav = tone ? ToneGenerator.Sine(48000, 2, 440.0, seconds: 1.0) : WavReader.Load(wavPath);
+        Console.WriteLine(tone ? "Signal: 440 Hz sine, 48000 Hz stereo Int16 (1 s loop)" : $"WAV: {wav.SampleRate}Hz, {wav.Channels}ch, {wav.BitsPerSample}bit, {wav.PcmData.Length} bytes ({wav.DurationSeconds:F2}s)");
 
         // Create audio output matching the endpoint's preferred format
         // The callback will convert from WAV format -> endpoint format
@@ -79,8 +109,10 @@ internal static class Program
             Latency = exclusive ? AudioOutput_LatencyMode.Exclusive : lowLatency ? AudioOutput_LatencyMode.LowLatency : AudioOutput_LatencyMode.Default,
             Processing = raw ? AudioOutput_StreamProcessing.Raw : AudioOutput_StreamProcessing.SystemEffects,
             SwitchPolicy = deviceId != null ? AudioSwitchPolicy.PreferenceList : AudioSwitchPolicy.FollowDefault, PreferredDevices = deviceId != null ? [deviceId] : null,
+            Backend = asio ? AudioOutput_Backend.Asio : AudioOutput_Backend.Auto,
+            Asio_OutputChannelOffset = new(asioOffset),
         };
-        Console.WriteLine($"Requested: latency {options.Latency}, processing {options.Processing}");
+        Console.WriteLine($"Requested: backend {options.Backend}, latency {options.Latency}, processing {options.Processing}");
         using var output = AudioOutput.Create(format, options);
         Console.WriteLine($"Consumer format: {output.Format.SampleRate}Hz, {output.Format.Channels}ch, {output.Format.Format}");
         Console.WriteLine($"Device format: {output.DeviceFormat.SampleRate}Hz, {output.DeviceFormat.Channels}ch, {output.DeviceFormat.Format}");
@@ -99,7 +131,7 @@ internal static class Program
 
         // Playback state — accessed only from the audio thread (no lock needed)
         bool looping = true; // Always loop — duration controls when we stop
-        var state = new PlaybackState(wav, looping);
+        var state = new PlaybackState(wav, looping, volume);
 
         // Default to 30 seconds if no duration specified (use --duration N to override)
         if (!durationSeconds.HasValue)
@@ -383,5 +415,21 @@ internal static class WavReader
             BitsPerSample = bitsPerSample,
             PcmData = pcmData
         };
+    }
+}
+
+/// <summary>Synthesises a looping sine as Int16 PCM so the ASIO/WASAPI measurements use a clean, known signal (--tone).</summary>
+internal static class ToneGenerator
+{
+    public static WavData Sine(int sampleRate, int channels, double frequencyHz, double seconds)
+    {
+        int frames = (int)(sampleRate * seconds);
+        var pcm = new byte[frames * channels * 2];
+        for (int f = 0; f < frames; f++)
+        {
+            short s = (short)(Math.Sin(2 * Math.PI * frequencyHz * f / sampleRate) * 32767 * 0.25);
+            for (int c = 0; c < channels; c++) { int o = (f * channels + c) * 2; pcm[o] = (byte)s; pcm[o + 1] = (byte)(s >> 8); }
+        }
+        return new WavData { SampleRate = sampleRate, Channels = channels, BitsPerSample = 16, PcmData = pcm };
     }
 }
