@@ -153,9 +153,12 @@ tests/SimpleAudioTest/Program.cs                 --asio [--asio-driver "MOTU M S
       440 Hz tone for 10 s on the M4: record `PeriodFrames`, `LatencyMs`, `UnderrunCount` in §7.
 - [x] **Phase 3 — Reset/loss**: D13 exercised on hardware (§7.3 panel changes down to 32 frames, §7.4 hot-unplug → one `DeviceLost`, clean exit). D14 as coded.
 - [x] **Phase 4 — Docs**: README + README-nuget (backend rows, ASIO section, trademark line), spec 60 §1/§9 amendment, overview I1 note + matrix row, `_PROJECT_STRUCTURE.md`.
-      **Consumer opt-in is MusicStudio's change, not this repo's:** `AudioOutputOptions { Backend = Asio, PreferredDevices = [persisted "asio:{CLSID}"] }`
-      behind `MUSICSTUDIO_AUDIO_BACKEND=asio|wasapi`, status line shows `PeriodFrames`/`LatencyMs`/`UnderrunCount`, and its `DeviceLost` handler offers the
-      §7.4 hint ("driver installed, hardware not answering — restart the vendor panel/service"). Pin `ANAudioVersion` to the next publish.
+- [x] **Consumer adoption — MusicStudio, 2026-09-13 (its commit `6071a80`, spec `Bringup/18` §7c):** pinned `0.260913.65602`; **ASIO is its DEFAULT
+      backend** (not opt-in — the user's WASAPI measurements on the M4 made the case: shared min = max = 512, exclusive accepts only 24-in-32 and
+      aligns to 512 anyway), `MUSICSTUDIO_AUDIO_BACKEND=wasapi|auto` opts out, `MUSICSTUDIO_AUDIO_DEVICE=asio:{CLSID}` names a driver; status line
+      `ASIO period 64 frames …, est. latency 1.5 ms`; an ASIO `Create` that throws (§7.4) → WASAPI retry + the hint. Safe as a default because D6
+      `AdoptDriverRate` never changes the device clock — §8's reason for keeping `Auto` off ASIO does not apply to a consumer that chooses it.
+      User verdict: "that FINALLY feels playable", while Spotify played through WDM on the same M4 (multi-client, no exclusive lock).
 
 ## 7. Verification / measurements
 

@@ -9,9 +9,12 @@ public enum AudioOutput_LatencyMode
     /// Linux: hw_params min period + SCHED_FIFO). <see cref="AudioOutputOptions.BufferSizeMs"/> is ignored. Falls back to <see cref="Default"/>
     /// when the OS refuses — see <see cref="IAudioOutput.LatencyModeActual"/> / <see cref="IAudioOutput.LatencyFallbackReason"/>.</summary>
     LowLatency = 1,
-    /// <summary>Windows: WASAPI EXCLUSIVE mode, event-driven, at the driver's minimum device period (typically 2\u20133 ms) \u2014 the only path under 10 ms
-    /// when the driver exposes no small SHARED period (Realtek UAD, NVIDIA HDMI, virtual devices all report a single 10 ms period). Costs: no other
-    /// application can play through the endpoint while we hold it, and system effects are bypassed regardless of <see cref="AudioOutputOptions.Processing"/>.
+    /// <summary>Windows: WASAPI EXCLUSIVE mode, event-driven, at the driver's minimum device period. Was thought to be the only path under 10 ms when
+    /// the driver exposes no small SHARED period (Realtek UAD, NVIDIA HDMI, virtual devices all report a single 10 ms period) — but a vendor WDM
+    /// driver may pin exclusive at the same size (MOTU M4: accepts only 24-in-32, aligns every request back to 512 frames; MusicStudio spec
+    /// Bringup/18 §7c), and the real sub-10 ms path on a pro interface is <see cref="AudioOutput_Backend.Asio"/> (spec 70), which is also
+    /// multi-client. Costs of exclusive: no other application can play through the endpoint while we hold it, and system effects are bypassed
+    /// regardless of <see cref="AudioOutputOptions.Processing"/>.
     /// Falls back to <see cref="LowLatency"/>, then <see cref="Default"/>. macOS/Linux: treated as <see cref="LowLatency"/>.</summary>
     Exclusive = 2,
 }
