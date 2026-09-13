@@ -65,6 +65,10 @@ internal sealed unsafe class Asio_DriverHost : IDisposable
     private static Asio_DriverHost? s_active;
     private static readonly object s_activeLock = new();
 
+    /// <summary><c>AN_AUDIO_TRACE=1</c> → stderr trace of every driver call boundary, with thread ids (debugging the reset protocol needs it).</summary>
+    internal static readonly bool Trace = Environment.GetEnvironmentVariable("AN_AUDIO_TRACE") == "1";
+    internal static void Log(string message) { if (Trace) Console.Error.WriteLine($"[AN.Audio ASIO t{Environment.CurrentManagedThreadId}] {message}"); }
+
     // ─── open / close ──────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>Starts the host thread, creates the window and the driver, calls <c>init</c> and reads the capabilities. Blocks until done; throws on failure.</summary>
@@ -120,16 +124,7 @@ internal sealed unsafe class Asio_DriverHost : IDisposable
             if (_hwnd == 0) throw new InvalidOperationException($"CreateWindowExW failed ({Marshal.GetLastPInvokeError()})");
             if (_owner is { } o && o.Value != 0) SetWindowLongPtrW(_hwnd, GWLP_HWNDPARENT, o.Value);
 
-            Guid clsid = Info.Key.Clsid, iid = clsid; // the ASIO quirk: IID == CLSID
-            hr = CoCreateInstance(ref clsid, 0, CLSCTX_INPROC_SERVER, ref iid, out _driver);
-            if (hr < 0 || _driver == 0) throw new InvalidOperationException($"CoCreateInstance({clsid:B}) failed: 0x{hr:X8} — {Info.Name} ({Info.DllPath})");
-
-            if (Asio_Driver.Init(_driver, (void*)_hwnd) == Asio_Bool.ASIOFalse)
-            {
-                byte* msg = stackalloc byte[256]; Asio_Driver.GetErrorMessage(_driver, msg);
-                throw new InvalidOperationException($"ASIO init failed for {Info.Name}: {Marshal.PtrToStringAnsi((nint)msg)}");
-            }
-            ReadCapabilities();
+            CreateAndInitDriver();
             _ready.Set();
 
             // Pump: wake on our event (work queue / quit) or on any window message.
@@ -148,21 +143,55 @@ internal sealed unsafe class Asio_DriverHost : IDisposable
         }
         finally
         {
-            // Teardown in SDK order: stop → disposeBuffers → Release → window → COM.
-            if (_driver != 0)
-            {
-                if (_started) { Asio_Driver.Stop(_driver); _started = false; }
-                if (_buffersCreated) { Asio_Driver.DisposeBuffers(_driver); _buffersCreated = false; }
-                Asio_Driver.Release(_driver); _driver = 0;
-            }
-            FreeBufferMemory();
+            ReleaseDriver();
             if (_hwnd != 0) { DestroyWindow(_hwnd); _hwnd = 0; }
             if (comInitialised) CoUninitialize();
         }
     }
 
+    /// <summary>CoCreateInstance(iid = clsid) + <c>init(hwnd)</c> + capabilities. Host thread only.</summary>
+    private void CreateAndInitDriver()
+    {
+        Guid clsid = Info.Key.Clsid, iid = clsid; // the ASIO quirk: IID == CLSID
+        int hr = CoCreateInstance(ref clsid, 0, CLSCTX_INPROC_SERVER, ref iid, out _driver);
+        if (hr < 0 || _driver == 0) throw new InvalidOperationException($"CoCreateInstance({clsid:B}) failed: 0x{hr:X8} — {Info.Name} ({Info.DllPath})");
+        Log("init(hwnd)");
+        if (Asio_Driver.Init(_driver, (void*)_hwnd) == Asio_Bool.ASIOFalse)
+        {
+            byte* msg = stackalloc byte[256]; Asio_Driver.GetErrorMessage(_driver, msg);
+            throw new InvalidOperationException($"ASIO init failed for {Info.Name}: {Marshal.PtrToStringAnsi((nint)msg)}");
+        }
+        ReadCapabilities();
+    }
+
+    /// <summary>Teardown in SDK order: stop → disposeBuffers → Release. Host thread only.</summary>
+    private void ReleaseDriver()
+    {
+        if (_driver != 0)
+        {
+            if (_started) { Asio_Driver.Stop(_driver); _started = false; }
+            if (_buffersCreated) { Asio_Driver.DisposeBuffers(_driver); _buffersCreated = false; }
+            Log("Release()");
+            Asio_Driver.Release(_driver); _driver = 0;
+        }
+        FreeBufferMemory();
+    }
+
+    /// <summary>D13 as the SDK actually specifies it: <c>kAsioResetRequest</c> = "close the driver (ASIOExit) and re-open it (ASIOInit)". A
+    /// disposeBuffers/createBuffers cycle on the SAME instance is not enough — measured on the MOTU M4: the driver kept reporting the old
+    /// preferred size and never called bufferSwitch again. Host thread only; buffers are gone afterwards, the client re-configures.</summary>
+    public void Reinitialize()
+    {
+        RequireHostThread();
+        Log("reinitialize: release + create + init");
+        ReleaseDriver();
+        CreateAndInitDriver();
+        Log($"reinitialize: preferred={BufferPreferred} [{BufferMin}..{BufferMax}] rate={SampleRate} outs={OutputChannels}");
+    }
+
     private void ReadCapabilities()
     {
+        Log("readCapabilities");
         byte* name = stackalloc byte[128];
         Asio_Driver.GetDriverName(_driver, name);
         DriverName = Marshal.PtrToStringAnsi((nint)name) ?? Info.Name;
@@ -178,6 +207,15 @@ internal sealed unsafe class Asio_DriverHost : IDisposable
     public void ReadLatencies()
     {
         int i, o; if (Asio_Driver.GetLatencies(_driver, &i, &o) == Asio_Error.ASE_OK) { InputLatencyFrames = i; OutputLatencyFrames = o; }
+    }
+
+    /// <summary>D13: after <c>kAsioResetRequest</c> the driver's preferred buffer size / rate / channel count may all have changed — re-read them
+    /// BEFORE re-creating buffers (creating with the stale size is <c>ASE_InvalidMode</c>).</summary>
+    public void RefreshCapabilities()
+    {
+        RequireHostThread();
+        ReadCapabilities();
+        Log($"capabilities: preferred={BufferPreferred} [{BufferMin}..{BufferMax}] rate={SampleRate} outs={OutputChannels}");
     }
 
     // ─── marshalling onto the host thread ─────────────────────────────────────────────────────────────────────────
@@ -243,7 +281,10 @@ internal sealed unsafe class Asio_DriverHost : IDisposable
         _callbacks->SampleRateDidChange = &OnSampleRateDidChange;
         _callbacks->AsioMessage = &OnAsioMessage;
         _callbacks->BufferSwitchTimeInfo = &OnBufferSwitchTimeInfo;
-        Check(Asio_Driver.CreateBuffers(_driver, _bufferInfos, _bufferInfoCount, bufferFrames, _callbacks), $"createBuffers({_bufferInfoCount} ch, {bufferFrames})");
+        Log($"createBuffers({_bufferInfoCount} ch, {bufferFrames})");
+        var created = Asio_Driver.CreateBuffers(_driver, _bufferInfos, _bufferInfoCount, bufferFrames, _callbacks);
+        Log($"createBuffers -> {created}");
+        Check(created, $"createBuffers({_bufferInfoCount} ch, {bufferFrames})");
         _buffersCreated = true;
         for (int i = 0; i < outputs.Length; i++)
         {
@@ -260,7 +301,7 @@ internal sealed unsafe class Asio_DriverHost : IDisposable
     {
         RequireHostThread();
         if (_started) Stop();
-        if (_buffersCreated) { Asio_Driver.DisposeBuffers(_driver); _buffersCreated = false; }
+        if (_buffersCreated) { Log("disposeBuffers()"); var e = Asio_Driver.DisposeBuffers(_driver); _buffersCreated = false; Log($"disposeBuffers() -> {e}"); }
         FreeBufferMemory();
     }
 
@@ -271,8 +312,8 @@ internal sealed unsafe class Asio_DriverHost : IDisposable
         _bufferInfoCount = 0;
     }
 
-    public void Start() { RequireHostThread(); Check(Asio_Driver.Start(_driver), "start"); _started = true; }
-    public void Stop() { RequireHostThread(); if (!_started) return; Asio_Driver.Stop(_driver); _started = false; }
+    public void Start() { RequireHostThread(); Log("start()"); Check(Asio_Driver.Start(_driver), "start"); _started = true; Log("start() ok"); }
+    public void Stop() { RequireHostThread(); if (!_started) return; Log("stop()"); var e = Asio_Driver.Stop(_driver); _started = false; Log($"stop() -> {e}"); }
     public bool IsStarted => _started;
     public void ControlPanel() { RequireHostThread(); Asio_Driver.ControlPanel(_driver); }
 
@@ -307,6 +348,7 @@ internal sealed unsafe class Asio_DriverHost : IDisposable
     private static int OnAsioMessage(int selector, int value, void* message, double* opt)
     {
         var h = s_active; if (h is null) return 0;
+        Log($"asioMessage({(Asio_MessageSelector)selector}, value={value})");
         try
         {
             switch ((Asio_MessageSelector)selector)

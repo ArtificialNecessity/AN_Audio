@@ -195,19 +195,24 @@ internal sealed unsafe class AsioAudioOutput : IAudioOutput
     private void RequestReset() => _host.PostToHost(() =>
     {
         if (_disposed) return;
+        Asio_DriverHost.Log("reset: begin");
         bool wasRunning = _running;
         var oldFormat = _deviceFormat; int oldPeriod = _periodFrames;
         try
         {
             Teardown();
+            Asio_DriverHost.Log("reset: torn down, re-initialising the driver (SDK: ASIOExit + ASIOInit)");
+            _host.Reinitialize();
             Configure();
+            Asio_DriverHost.Log($"reset: configured period={_periodFrames} rate={_deviceFormat.SampleRate}, wasRunning={wasRunning}");
             if (wasRunning) _host.Start();
             if (_deviceFormat != oldFormat) DeviceFormatChanged?.Invoke(_deviceFormat);
             if (_deviceFormat != oldFormat || _periodFrames != oldPeriod) DeviceSwitched?.Invoke(_device); // PeriodFrames may have changed (60 D4)
         }
-        catch
+        catch (Exception e)
         {
-            // Hardware gone or driver in a bad mode: report once, stop (overview rule 8).
+            // Hardware gone or driver in a bad mode: report once, stop (overview rule 8). Never silently.
+            Asio_DriverHost.Log("reset FAILED: " + e);
             _running = false; _callback = null;
             DeviceLost?.Invoke(DeviceLostReason.DeviceRemoved);
         }

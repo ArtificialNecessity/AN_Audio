@@ -179,6 +179,21 @@ tests/SimpleAudioTest/Program.cs                 --asio [--asio-driver "MOTU M S
 
 Also fixed on the way: `SimpleAudioTest --volume` was parsed and never applied (played at unity); default is now 0.25.
 
+### 7.3 Phase 3 — panel buffer-size changes while playing (D13), MOTU M4, 2026-09-13
+
+First attempt (dispose/create on the same instance): sound stopped, driver still reported the old preferred size, no `bufferSwitch` ever again.
+With `Asio_DriverHost.Reinitialize()` (Release + CoCreateInstance + init): **seven consecutive panel changes in one 30 s run** — 64 → 128 → 256 → 64 →
+128 → 64 → **32** — each producing one `DeviceSwitched` with the new period, 0 underruns throughout, clean exit; user-confirmed "a small gap every time,
+then it resumed". `kAsioResetRequest` is delivered on a driver thread (t5), never the host thread.
+
+| panel | `PeriodFrames` | `LatencyMs` (`outputLatency`) |
+|---|---|---|
+| 32 | 32 = 0.73 ms | **1.59 ms** |
+| 64 | 64 = 1.45 ms | 2.31 ms |
+| 128 | 128 = 2.90 ms | 3.76 ms |
+| 256 | 256 = 5.80 ms | 6.67 ms |
+| 512 | 512 = 11.61 ms | 12.47 ms |
+
 - Unit as in §5; hardware: `SimpleAudioTest --asio` on the M4 at panel sizes 32/64/128/256 — table of `PeriodFrames`, `LatencyMs`
   (`outputLatency`), `UnderrunCount` after 10 s, to be recorded here (mirrors 60 §4.1).
 - README line (Steinberg usage guidelines): "ASIO is a trademark and software of Steinberg Media Technologies GmbH." No SDK file is shipped;

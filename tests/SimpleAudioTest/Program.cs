@@ -123,7 +123,7 @@ internal static class Program
 
         // Subscribe to device management events for diagnostics
         output.DeviceSwitched += device =>
-            Console.WriteLine($"\n  >> DEVICE SWITCHED: {device}");
+            Console.WriteLine($"\n  >> DEVICE SWITCHED: {device}  period {output.PeriodFrames} frames = {output.PeriodFrames * 1000.0 / output.DeviceFormat.SampleRate:F2} ms, latency {output.LatencyMs:F2} ms, underruns {output.UnderrunCount}");
         output.DeviceFormatChanged += newFormat =>
             Console.WriteLine($"\n  >> DEVICE FORMAT CHANGED: {newFormat.SampleRate}Hz, {newFormat.Channels}ch, {newFormat.Format}");
         output.DeviceLost += reason =>
