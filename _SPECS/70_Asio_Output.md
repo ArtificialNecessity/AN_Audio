@@ -1,6 +1,6 @@
 # 70 — ASIO output backend (Windows)
 
-- **Status:** Phases 1–3 **BUILT 2026-09-13**, hardware-validated on the MOTU M4 (§7.2). Phases 3–4 pending. Depends on `71_CHeader_Bindings_Autogen.md` (BUILT) for every struct/enum/vtable declaration.
+- **Status:** **BUILT 2026-09-13 (Phases 0–4)**, hardware-validated on the MOTU M4 (§7.2–§7.4). Consumer adoption (MusicStudio) is the next step, in its own repo. Depends on `71_CHeader_Bindings_Autogen.md` (BUILT) for every struct/enum/vtable declaration.
 - **Parent:** `00_AN_Audio_Overview.md`; extends `60_Low_Latency_Output.md` (whose §1 listed ASIO as a non-goal — amended by D1 below);
   device semantics from `20_Audio_Device_Management.md`.
 - **Ground truth:** Steinberg ASIO SDK 2.3.x at `C:\PROJECTS\3P_ASIOSDK` (`common/asiosys.h`, `common/asio.h`, `common/iasiodrv.h`), read
@@ -149,8 +149,10 @@ tests/SimpleAudioTest/Program.cs                 --asio [--asio-driver "MOTU M S
 - [x] **Phase 2 — Output**: `createBuffers` (outputs), callbacks table, `Asio_PlanarWriter`, `AsioAudioOutput` Start/Stop/Dispose, D5–D9, D11, D12.
       440 Hz tone for 10 s on the M4: record `PeriodFrames`, `LatencyMs`, `UnderrunCount` in §7.
 - [x] **Phase 3 — Reset/loss**: D13 exercised on hardware (§7.3 panel changes down to 32 frames, §7.4 hot-unplug → one `DeviceLost`, clean exit). D14 as coded.
-- [ ] **Phase 4 — Docs/consumers**: D2/D3 wiring is done (`AudioOutput.Create`, `GetDeviceManager(backend)`); pending: README (backend table row, trademark line §7), spec 60 §1/§9
-      amendment, overview I1 note + matrix row, `_PROJECT_STRUCTURE.md`. MusicStudio opts in via `MUSICSTUDIO_AUDIO_BACKEND=asio`.
+- [x] **Phase 4 — Docs**: README + README-nuget (backend rows, ASIO section, trademark line), spec 60 §1/§9 amendment, overview I1 note + matrix row, `_PROJECT_STRUCTURE.md`.
+      **Consumer opt-in is MusicStudio's change, not this repo's:** `AudioOutputOptions { Backend = Asio, PreferredDevices = [persisted "asio:{CLSID}"] }`
+      behind `MUSICSTUDIO_AUDIO_BACKEND=asio|wasapi`, status line shows `PeriodFrames`/`LatencyMs`/`UnderrunCount`, and its `DeviceLost` handler offers the
+      §7.4 hint ("driver installed, hardware not answering — restart the vendor panel/service"). Pin `ANAudioVersion` to the next publish.
 
 ## 7. Verification / measurements
 

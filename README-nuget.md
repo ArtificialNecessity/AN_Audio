@@ -52,6 +52,7 @@ output.Stop();
 | Platform | Backend | Status |
 | -------- | ------- | ------ |
 | Windows | WASAPI shared mode, event-driven | ✅ |
+| Windows | ASIO — the user's installed driver, opt-in via `AudioOutputOptions.Backend = AudioOutput_Backend.Asio` (`asio:{CLSID}` device ids) | ✅ |
 | macOS | AudioQueue (AudioToolbox) | ✅ |
 | Linux | ALSA (`libasound.so.2`) | ✅ |
 | Android / iOS | AAudio / AudioQueue | planned |
@@ -164,6 +165,7 @@ public static class AudioSampleConvert { Convert(src, from, dst, to); ToFloat32(
 
 Apache License, Version 2.0 — see [LICENSE](https://github.com/ArtificialNecessity/AN_Audio/blob/main/LICENSE.txt).
 `ArtificialNecessity.Audio.Formats` contains a FLAC bitstream decoder derived from [jdpurcell/SimpleFlac](https://github.com/jdpurcell/SimpleFlac) (MIT); its notice ships in the package as `LICENSE-SimpleFlac.txt`.
+ASIO is a trademark and software of Steinberg Media Technologies GmbH; `ArtificialNecessity.Audio` contains no Steinberg SDK code.
 
 ## Source
 

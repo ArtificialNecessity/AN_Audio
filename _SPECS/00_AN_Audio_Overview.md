@@ -16,7 +16,7 @@ operating system's audio stack.
 
 | # | Invariant | What it means in practice |
 |---|---|---|
-| I1 | **Zero native dependencies** | PInvoke / manual COM vtables into libraries the OS already ships (`winmm`, WASAPI, `libasound.so.2`, AudioToolbox/CoreAudio/CoreMIDI, AAudio, `android.media.midi` via JNI). Nothing to bundle, nothing to install, one `AnyCPU` MSIL assembly per feature area. NativeAOT-compatible (no reflection-based COM, no RCWs). |
+| I1 | **Zero native dependencies** | PInvoke / manual COM vtables into libraries the OS already ships (`winmm`, WASAPI, `libasound.so.2`, AudioToolbox/CoreAudio/CoreMIDI, AAudio, `android.media.midi` via JNI). Nothing to bundle, nothing to install, one `AnyCPU` MSIL assembly per feature area. NativeAOT-compatible (no reflection-based COM, no RCWs). **Amendment (spec 70 D1, 2026-09-13):** a vendor driver the user installed with their hardware (ASIO) counts as "already on the machine" — we may load it, we never ship it; its declarations are generated from a locally-installed SDK (spec 71), never copied. |
 | I2 | **One API shape everywhere** | Consumers see `IAudioOutput`, `IAudioInput`, `IMidiInput`, `IMidiOutput`, plus one `*_DeviceManager` per area. A platform backend implements the interface; it never leaks platform types. `Xxx.IsAvailable` says whether a backend exists; the shape never changes. |
 | I3 | **One hot path per stream, allocation-free** | Exactly one callback (or one SPSC ring) carries the real-time data: `AudioCallback(Span<byte>, frames, format)`, `MidiInput_Callback(in MidiInput_Message)`. Fixed-size blittable structs, no `string`, no boxing, no locks, no I/O. Everything else is control plane. Initialisation and device recovery are NOT zero-alloc and never run on the hot thread. |
 | I4 | **Event-driven, never polled** | The OS wakes us (WASAPI event, ALSA `poll`, AudioQueue/CoreMIDI callback, WinMM driver callback). Where an OS genuinely offers no notification (WinMM MIDI hot-plug, ALSA device changes) we poll **once per second on a background thread** and document it as a platform limitation with an opt-in to an OS hook when one exists (`WM_DEVICECHANGE`, udev). Never poll for data. |
@@ -26,7 +26,7 @@ operating system's audio stack.
 
 | Area | Interface / factory | Windows | macOS | Linux | Android | iOS | Spec |
 |---|---|---|---|---|---|---|---|
-| PCM output | `IAudioOutput` / `AudioOutput` | ✅ WASAPI shared, event-driven | ✅ AudioQueue | ✅ ALSA | ◻ AAudio | ◻ AudioQueue | `10_Audio_Bringup.md` |
+| PCM output | `IAudioOutput` / `AudioOutput` | ✅ WASAPI shared/exclusive, event-driven; ✅ **ASIO** opt-in (`AudioOutput_Backend.Asio`, spec 70) | ✅ AudioQueue | ✅ ALSA | ◻ AAudio | ◻ AudioQueue | `10_Audio_Bringup.md`, `60`, `70` |
 | Output device mgmt | `IAudioDeviceManager` | ✅ MMDevice + `IMMNotificationClient` | ✅ property listeners | ✅ hints + reactive loss | ◻ | ◻ | `20_Audio_Device_Management.md` |
 | PCM **input (capture)** | `IAudioInput` / `AudioInput` | ◻ WASAPI capture | ◻ AudioQueue input | ◻ ALSA capture | ◻ AAudio | ◻ | **TBD `40_Audio_Capture.md`** |
 | **MIDI input** | `IMidiInput` / `MidiInput` | ✅ WinMM `midiIn*` | ✅ CoreMIDI (C API, OS hot-plug) | ✅ ALSA rawmidi (libc only; seq backend planned for timestamps) | ◻ `android.media.midi` | ◻ CoreMIDI | `30_MidiInput.md` §5 / §10 / §11 |

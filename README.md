@@ -18,6 +18,7 @@ AN.Audio calls them directly through PInvoke and manual COM vtable dispatch, pro
 | Platform | Backend | Status |
 |----------|---------|--------|
 | Windows | WASAPI (shared mode, event-driven) | ✅ Working |
+| Windows | **ASIO** (the user's installed driver, opt-in) | ✅ Working — MOTU M4: 128 frames → 3.5 ms, 32 frames → 1.6 ms |
 | macOS | AudioQueue (AudioToolbox) | ✅ Working |
 | Linux | ALSA (`libasound.so.2`) | ✅ Working |
 | Android | AAudio | 🔲 Future |
@@ -70,6 +71,30 @@ The callback is the only extension point. It runs on a high-priority audio threa
 - `Stop()` blocks until the audio thread has drained or stopped; call it from a control thread, not the audio callback. The output can subsequently be started again.
 - `LatencyMs` estimates submission-to-DAC latency, not hardware playback position. Requested buffer size is not an end-to-end latency guarantee.
 - `AudioOutput.IsAvailable` identifies supported operating systems; it does not guarantee an accessible physical output device.
+
+### ASIO (Windows, opt-in)
+
+Pro audio interfaces ship an ASIO driver that *is* their low-latency path. AN.Audio talks to it directly (COM vtable, no SDK binary, no bundled
+native code — the driver is already on the user's machine with the hardware):
+
+```csharp
+var asio = AudioOutput.GetDeviceManager(AudioOutput_Backend.Asio)!.GetOutputDevices();   // ids look like "asio:{CLSID}"
+using var output = AudioOutput.Create(format, new AudioOutputOptions
+{
+    Backend = AudioOutput_Backend.Asio,              // or Auto + an "asio:" id in PreferredDevices
+    PreferredDevices = [asio[0].Id],
+    Asio_OutputChannelOffset = new(0),               // hardware outputs [offset, offset + format.Channels)
+    Asio_SampleRate = Asio_SampleRatePolicy.AdoptDriverRate,   // default: never touch the device clock, resample instead
+});
+// output.PeriodFrames == the driver's PREFERRED buffer size (set in the vendor panel); output.LatencyMs == the driver's outputLatency
+```
+
+Rules of the road: the buffer size is the driver's (change it in the vendor panel — AN.Audio follows via the reset protocol, with a short gap);
+`Auto` never picks ASIO by itself; `SwitchPolicy` has no meaning (there is no "default ASIO driver"); unplugging fires one `DeviceLost`.
+Not supported: DSD, MSB sample types, more than one ASIO driver open per process. See `_SPECS/70_Asio_Output.md` for the measured behaviour.
+
+*ASIO is a trademark and software of Steinberg Media Technologies GmbH.* AN.Audio ships no part of the Steinberg SDK; its declarations are
+generated from a locally-installed SDK by the bindings compiler in `src/AN.Audio/BindingsCompiler` (`_SPECS/71_CHeader_Bindings_Autogen.md`).
 
 ## MIDI Input
 

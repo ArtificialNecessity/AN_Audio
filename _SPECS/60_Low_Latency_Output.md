@@ -18,9 +18,11 @@ device lock, no third-party drivers (I1) — and reports what it actually got. T
 | macOS | AudioQueue, 3 × `BufferSizeMs` = 60 ms | **≈ 3–6 ms** | AUHAL (`kAudioUnitSubType_HALOutput`) render callback, `kAudioDevicePropertyBufferFrameSize` 64–128 |
 | Linux | `snd_pcm_set_params(latency = BufferSizeMs)` ≈ 20 ms, no RT | **≈ 3–8 ms** | explicit `hw_params` period 64–128 × 2–3, `SCHED_FIFO` on the poll thread |
 
-**Non-goals:** exclusive mode (Windows) / hog mode (macOS) — they take the device from every other app; ASIO/JACK (third-party or non-default
-stacks, I1); sub-block scheduling of events inside a period (consumer's job — MusicStudio's engine places note-ons by `ArrivalTicks`); latency
+**Non-goals:** hog mode (macOS) — it takes the device from every other app (Windows exclusive mode was added as `Exclusive`, D1); JACK
+(a non-default stack, I1); sub-block scheduling of events inside a period (consumer's job — MusicStudio's engine places note-ons by `ArrivalTicks`); latency
 *measurement* hardware (a loopback tool is §8, capture is spec 40).
+**Amended 2026-09-13:** ASIO was a non-goal here under I1; spec 70 D1 reclassifies the user's *installed* ASIO driver as part of the machine (nothing is
+bundled) and builds it as an opt-in Windows backend. §4.1's conclusion — no sub-10 ms path on a typical consumer box — is what ASIO answers: MOTU M4 3.5 ms at 128 frames, 1.6 ms at 32.
 
 ## 2. Decisions
 
@@ -234,6 +236,7 @@ quantum. Record which path was taken in `LatencyFallbackReason`.
 - [x] **Phase A — Windows** (§4): interop, `IAudioClient3` path, Exclusive path, RAW, MMCSS, D4/D7 members on all three backends (macOS/Linux report
       their existing values), published `0.260909.80722`; MusicStudio requests `LowLatency + Raw` (`MUSICSTUDIO_AUDIO_LATENCY=exclusive|low|default`,
       `MUSICSTUDIO_AUDIO_RAW=0`) and reports `PeriodFrames/mode/fallback/underruns` in its status line. **Pending: measurement on a driver that offers a small period (MOTU M4).**
+      **2026-09-13:** the M4 arrived; its WASAPI path was not measured because the ASIO backend (spec 70) reached 3.5 ms / 1.6 ms first and is the intended pro-interface path.
 - [ ] **Phase B — Linux** (§6): explicit hw_params + `SCHED_FIFO`; needs a Linux box with a real card.
 - [ ] **Phase C — macOS** (§5): AUHAL backend; needs a Mac.
 - [ ] **Phase D** (optional): rtkit on Linux; workgroup join on macOS if a helper thread ever appears; native PipeWire backend if `hw:` fallback
