@@ -156,3 +156,18 @@ record: under pack(4) its `void* sysRef` lands at offset 164 → sizeof 172 on x
 - `sysv-x64`/`darwin-arm64` ABIs for spec 60 B/C: same model, different `long`/pack rules; add when those phases start.
 - Steinberg ASIO SDK licence: we generate our own declarations from a locally-installed SDK and ship no SDK file; the README carries the
   required "ASIO is a trademark and software of Steinberg Media Technologies GmbH" line (spec 70 §7).
+
+## 9. As built — deviations from the draft (2026-09-13)
+
+| # | Draft said | Built | Why |
+|---|---|---|---|
+| A1 | D4: YeetCode PEG grammar `CHeader.grammar.yeet` | Hand-written tokenizer + recursive-descent (`CHeader_Parser.cs`); YeetCode remains the **template** engine | Same call the Wayland compiler made (XLinq over PEG): input is small and schema-stable, a hand parser is directly unit-testable with fixture headers, and no second grammar dialect to learn. |
+| A2 | §4: anonymous enums anchored by `anonymousAfter` (preceding line text) | `firstEntry` (first enumerator name), exactly-once rule | The "preceding line" of `kAsioEnableTimeCodeRead`'s enum is `*/`; the first enumerator is unambiguous by construction. |
+| A3 | §3: `Generated/Asio.*.generated.cs`, five templates incl. `Callbacks` | `Generated/Bindings.{Enums,Structs,Vtables,Layouts}.generated.cs`; callbacks are fn-ptr **fields** of `Asio_Callbacks` (`delegate* unmanaged[Cdecl]<…>`), so no separate template | One template run renders every surface into one file; the fn-ptr struct field IS the callback declaration. |
+| A4 | §3: tool wired via `ProjectReference ReferenceOutputAssembly=false` | `Exec dotnet run --project BindingsCompiler -- normalize …`, once per build in the OUTER multi-TFM build (`_BindingsGenOnce`); `YeetCode.MSBuild` targets imported explicitly there (exact pin `ANYeetCodeMsBuildVersion`) | A net10.0 Exe referenced from net8.0/net9.0 inner builds trips restore; NuGet only imports package `build/*.targets` per TFM, never in the outer build. |
+| A5 | D7: probe for x64 AND x86 | x64 only (the `Shadow` vtable trick relies on caller-cleanup; x86 thiscall stubs would need exact signatures) | The ABI model's x86 numbers are covered by unit tests against the §5 table; an x86 probe is a follow-up if x86 hardware ever matters. |
+| A6 | Pointer arrays (`void* buffers[2]`) | Expanded to `Buffers0`, `Buffers1` (`nint`) with per-element offsets in `AssertLayouts` | C# fixed buffers allow primitives only. |
+
+Probe evidence (this box, VS 18 `cl.exe`, SDK 2.3.x): `ASIOChannelInfo` 52, `ASIOBufferInfo` 24 (`buffers`@8), `ASIOTimeCode` 84 (`flags`@16, `future`@20),
+`AsioTimeInfo` 48 (`sampleRate`@24, `reserved`@36), `ASIOTime` **148** (`timeInfo`@16, `timeCode`@64), `ASIOCallbacks` 32, `IASIO` slots `init`=3 … `outputReady`=23 —
+identical to the model and to the hand-typed slots the spec-70 live probe used.

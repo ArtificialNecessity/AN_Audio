@@ -85,6 +85,12 @@ and only from projects that need a PCM type (Audio, Formats — not Midi).
   - `Internal/AudioFormatConverter.cs` — consumer↔device format bridge (rate via `SincResampler`, channel map, Int16↔Float32 via `AudioSampleConvert`; rejects other formats).
   - `Internal/SincResampler.cs` — windowed-sinc resampler (spec 01). STAYS here: it is device-side policy.
   - `Platforms/Windows/` — `WasapiAudioOutput.cs`, `WasapiDeviceManager.cs`, `WasapiInterop.cs` (COM vtables + PInvoke).
+  - **Spec 71 header-bindings pipeline** (FluidUI BindingsCompiler pattern; ASIO is the first surface, spec 70):
+    `BindingsCompiler/` — build-only tool (`extract` reads a locally-installed SDK, never committed; `normalize` runs in the build): `CHeader_Preprocessor`
+    (D3: `#if` against authored defines, undeclared symbol = error), `CHeader_Parser` (hand recursive-descent for the C subset + `interface X : public IUnknown`),
+    `CHeader_AbiModel` (sizeof/offsetof per `msvc-x64`/`msvc-x86`/…, pack), `CHeader_Extractor`, `CHeader_DeclarationCompiler`.
+    `CodeGen/` — `Wanted.ytdata.hjson` (authored), `Declarations.ytdata.hjson` (committed boundary), `Extraction.report.json` (SHA-256 evidence), `Bindings.ytdata.hjson`, `*.cs.ytmpl`.
+    `Generated/Bindings.{Enums,Structs,Vtables,Layouts}.generated.cs` — committed, never hand-edited: `Asio_Error/SampleType/MessageSelector/…`, struct mirrors, `Asio_Driver` thiscall vtable wrappers (slots 3–23), `Asio_Layouts.AssertLayouts()`.
   - `Platforms/MacOS/` — `CoreAudioOutput.cs`, `CoreAudioDeviceManager.cs`, `AudioToolboxInterop.cs`, `CoreAudioInterop.cs`.
   - `Platforms/Linux/` — `AlsaAudioOutput.cs`, `AlsaDeviceManager.cs`, `AlsaInterop.cs`.
 - `src/AN.Audio.Midi/` (`ArtificialNecessity.Audio.Midi`, namespace `AN.Audio.Midi`) — MIDI input, independent of the other packages (spec 30 D24).
@@ -113,7 +119,8 @@ and only from projects that need a PCM type (Audio, Formats — not Midi).
 
 **Tests:**
 - `tests/AN.Audio.Common.Tests/` — `AudioFormatTests.cs`, `AudioSampleConvertTests.cs` (exact round-trips, saturation, Int24 sign extension, UInt8 bias).
-- `tests/AN.Audio.Tests/` — `SincResamplerTests.cs`, `SincResamplerDiagnosticTests.cs`.
+- `tests/AN.Audio.Tests/` — `SincResamplerTests.cs`, `SincResamplerDiagnosticTests.cs`; `BindingsCompiler/` (preprocessor/parser fixture headers, ABI model vs spec 71 §5 table
+  for x64+x86); `Interop/Asio_LayoutTests` (generated enums/slots/sizes vs header, `AssertLayouts`, vtable dispatch through a fake object), `Interop/Asio_AbiProbeTests` + `abi-probe.cpp` (D7 oracle: compiled with `cl.exe` against the real SDK; skips without VS/SDK).
 - `tests/AN.Audio.Midi.Tests/` — message decode theory, ring (incl. two-thread + zero-alloc), SysEx/identity, `WinMm_InteropLayoutTests` (struct sizes vs SDK).
 - `tests/AN.Audio.Formats.Tests/` — `SniffTests`, `PeekableStreamTests`, `WavDecoderTests` (every case seekable AND through `Support/ForwardOnlyStream` with 1–97-byte reads), `WavG711Tests`, `WavRf64W64Tests`,
   `FlacDecoderTests` (bit-exact vs WAV master, MD5, tags, truncation, seek), `Mp3DecoderTests` (exact length vs master, time alignment, tags, picture callback, seek == linear, D13), `LocalFileTests` (`Category=Local`: `clap-808.wav`, Salamander `A0v3.flac`).
@@ -154,11 +161,13 @@ Numbered by feature area; a `*_IMPL.md` beside a design spec is its build checkl
 - `50_Audio_Formats.md` — **Key spec for decoding:** D1–D16, `AN.Audio.Common` (D15), zero-copy (D16), §WAV, §FLAC, §MP3, dependency audit, phases.
 - `50_Audio_Formats_IMPL.md` — the Phase 0–4 checklist, "As built" deviation table A1–A11, handoff notes (e.g. `clap-808.wav` is 24-bit mono).
 - `60_Low_Latency_Output.md` — **DRAFT.** `AudioOutputOptions.Latency = LowLatency` on all three platforms: Windows `IAudioClient3::InitializeSharedAudioStream` at the engine minimum period + MMCSS "Pro Audio" (Phase A, in progress); Linux explicit `hw_params` period + `SCHED_FIFO` (+ rtkit later); macOS AUHAL render callback replacing AudioQueue; new `IAudioOutput.PeriodFrames / LatencyModeActual / LatencyFallbackReason / UnderrunCount`. Driven by MusicStudio's measured key→sound budget (its spec Bringup/18).
+- `70_Asio_Output.md` — **DRAFT.** Optional `AudioOutput_Backend { Auto, Wasapi, Asio }`; ASIO drivers as `asio:{CLSID}` devices; STA host thread + hidden HWND; preferred buffer size; per-channel sample types; planar writer; reset protocol. MOTU M4 probed live (Int32LSB, preferred 128, 3.46 ms).
+- `71_CHeader_Bindings_Autogen.md` — **BUILT.** The header→C# bindings compiler (see `src/AN.Audio/BindingsCompiler`): pipeline, D1–D8, §5 layout table, §9 as-built deviations and MSVC probe evidence.
 
 ## External API notes: _EXTERNAL_APIS/
 
 One file per API, quoting the header/source actually read, with the version/commit: `WinMM_MidiIn.md`, `UMP_MIDI2_Format.md`,
-`WaveFormatExtensible_ChannelMask.md` (`SPEAKER_*`, `KSDATAFORMAT_SUBTYPE_*`), `SimpleFlac_FlacDecoder.md`, `NLayer_MpegFile.md`, `WASAPI_IAudioClient3_MMCSS.md` (IAudioClient2/3 vtable, IIDs, `AUDCLNT_E_*`, `avrt.dll`).
+`WaveFormatExtensible_ChannelMask.md` (`SPEAKER_*`, `KSDATAFORMAT_SUBTYPE_*`), `SimpleFlac_FlacDecoder.md`, `NLayer_MpegFile.md`, `WASAPI_IAudioClient3_MMCSS.md` (IAudioClient2/3 vtable, IIDs, `AUDCLNT_E_*`, `avrt.dll`), `ASIO_IASIO.md` (IASIO vtable, pack(4) layouts, licence position, MOTU M4 live probe).
 Rule 2 of the overview: read the SDK header, not the blog post.
 
 ## Architecture Patterns
