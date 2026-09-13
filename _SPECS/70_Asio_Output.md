@@ -86,11 +86,13 @@ hosting the driver's control panel inside our UI (we can *open* it — `controlP
 public enum AudioOutput_Backend { Auto = 0, Wasapi = 1, Asio = 2 }                       // NEW (Windows meaning; ignored elsewhere)
 public readonly record struct AudioOutput_NativeWindowHandle(nint Value);                 // NEW, branded HWND
 public readonly record struct Asio_ChannelIndex(int Value);                                // NEW
+public enum Asio_SampleRatePolicy { AdoptDriverRate = 0, SetDeviceRate = 1 }               // NEW (D6 amendment)
 
 public sealed class AudioOutputOptions {
     public AudioOutput_Backend Backend { get; set; } = AudioOutput_Backend.Auto;           // NEW (D2)
     public AudioOutput_NativeWindowHandle? Asio_OwnerWindow { get; set; }                  // NEW (D4)
     public Asio_ChannelIndex Asio_OutputChannelOffset { get; set; } = new(0);              // NEW (D8)
+    public Asio_SampleRatePolicy Asio_SampleRate { get; set; } = Asio_SampleRatePolicy.AdoptDriverRate;   // NEW (D6)
     // Latency, Processing, BufferSizeMs, SwitchPolicy, PreferredDevices unchanged
 }
 public enum AudioOutput_LatencyFallbackReason { …, BackendUnavailable = 7, DriverRateAdopted = 8 }   // NEW members (D2, D6)
@@ -126,19 +128,20 @@ halves zeroed (SDK: host has filled buffer B before `ASIOStart`).
 src/AN.Audio/
 ├── AudioOutput_Backend.cs                       enums/records of §3
 ├── AudioOutput.cs                               backend resolution (D2), GetDeviceManager(backend)
-├── Generated/Asio.*.generated.cs                spec 71 output
+├── Generated/Bindings.{Enums,Structs,Vtables,Layouts}.generated.cs   spec 71 output (Asio_* enums/structs, Asio_Driver vtable, Asio_Layouts)
 └── Platforms/Windows/Asio/
-    ├── AsioInterop.cs                           hand-written ONLY: ole32 CoCreateInstance(iid=clsid), user32 window/pump P/Invokes, registry read helpers
-    ├── Asio_DriverRegistry.cs                   D3 enumeration → Asio_DriverKey, Asio_DriverInfo(Name, Clsid, Dll)
+    ├── AsioInterop.cs                           hand-written ONLY: ole32 CoInitializeEx/CoCreateInstance(iid=clsid), user32 window/pump, kernel32 event
+    ├── Asio_DriverRegistry.cs                   D3 enumeration (Microsoft.Win32.Registry, bitness view) → Asio_DriverKey, Asio_DriverInfo(Key, Name, DllPath)
     ├── AsioDeviceManager.cs                     IAudioDeviceManager over the registry
-    ├── Asio_DriverHost.cs                       D4 thread + HWND + COM object + callbacks table + buffers; RunOnHost(action), RunOnHostAndWait
+    ├── Asio_DriverHost.cs                       D4 STA thread + HWND + COM object + callbacks table + buffers; RunOnHost/PostToHost; Reinitialize (D13); AN_AUDIO_TRACE
     ├── Asio_PlanarWriter.cs                     §4 deinterleave/convert
     └── AsioAudioOutput.cs                       IAudioOutput
-tests/AN.Audio.Tests/Asio/
-    ├── Asio_LayoutTests.cs                      AssertLayouts constants vs §5 of spec 71 (both ABIs), enum values vs header (ASE_NotPresent = -1000, ASIOSTInt32LSB = 18, kAsioResetRequest = 3, kAsioOverload = 15 …)
-    ├── Asio_PlanarWriterTests.cs                 every type, tail zeroing, zero-alloc loop
-    └── Asio_DriverRegistryTests.cs               skips when no driver registered; on this box expects "MOTU M Series"
-tests/SimpleAudioTest/Program.cs                 --asio [--asio-driver "MOTU M Series"] [--asio-offset 2] [--asio-panel]; trace prints channel types, buffer min/max/preferred/granularity, latencies, rate
+tests/AN.Audio.Tests/Interop/
+    ├── Asio_LayoutTests.cs                      AssertLayouts runs; sizes; enum values vs header (ASE_NotPresent = -1000, ASIOSTInt32LSB = 18, kAsioResetRequest = 3, kAsioOverload = 15 …); vtable dispatch via a fake object
+    ├── Asio_AbiProbeTests.cs + abi-probe.cpp    spec 71 D7 oracle (cl.exe against the real SDK; skips without VS/SDK)
+    ├── Asio_PlanarWriterTests.cs                every type, tail zeroing, zero-alloc loop
+    └── Asio_DriverRegistryTests.cs              ids round-trip; registry enumeration; Backend=Asio fallback reason (hardware parts skip without a driver)
+tests/SimpleAudioTest/Program.cs                 --asio [--asio-driver "MOTU M Series"|asio:{CLSID}] [--asio-offset 2] [--asio-probe] [--tone]; AN_AUDIO_TRACE=1 traces every driver boundary
 ```
 
 ## 6. Phases

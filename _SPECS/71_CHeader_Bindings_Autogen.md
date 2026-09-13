@@ -34,8 +34,8 @@
   Any `#if` referencing an **undeclared** symbol fails extraction (report lists it). No guessing.
 - **D4 — The grammar is C with the C++ subset ASIO needs:** `typedef`, `struct`, anonymous and named `enum` (implicit increment, hex,
   `1 << n`), fixed arrays, function-pointer fields, `#pragma pack(push,N)/pop`, and `interface|class X : public IUnknown { virtual T m(args) = 0; }`.
-  Everything else (templates, inline bodies, macros with bodies) is skipped and logged. `CHeader.grammar.yeet` (YeetCode PEG), embedded in
-  the tool like `ObjC.grammar.yeet`.
+  Everything else (templates, inline bodies, macros with bodies) is skipped and logged. **As built (§9 A1):** a hand-written tokenizer +
+  recursive-descent parser (`CHeader_Parser.cs`), not a YeetCode PEG grammar; YeetCode is the template engine only.
 - **D5 — ABI model in the normalizer, for both x64 AND x86.** AN.Audio is AnyCPU. The normalizer computes `sizeof`/`offsetof` under the
   declared target ABI (`msvc-x64`, `msvc-x86`; later `sysv-x64`, `darwin-arm64`) honouring `pack` and pointer width, and emits BOTH into
   `AssertLayouts()`; the runtime checks the one matching `IntPtr.Size`. Type map: `long`→`int`(msvc)/`nint`(sysv), `unsigned long`→`uint`/`nuint`,
@@ -60,19 +60,20 @@ src/AN.Audio/
 ├── BindingsCompiler/                      build-only tool (Exe, net10.0): extract | normalize
 │   ├── AN.Audio.BindingsCompiler.csproj     refs ArtificialNecessity.YeetCode + YeetJson (same versions FluidUI pins)
 │   ├── BindingsCompiler_Program.cs
-│   ├── CHeader.grammar.yeet                 D4 grammar (embedded resource)
-│   ├── CHeaderPreprocessor.cs               D3: #if/#ifdef/#elif/#else/#endif/#define/#undef/#include(wanted only)/#pragma pack
-│   ├── CHeaderExtractor.cs                  grammar → declaration records (1:1, source line kept)
-│   ├── CHeaderAbiModel.cs                   D5: sizeof/offsetof per target ABI
-│   └── CHeaderDeclarationCompiler.cs        normalize: validate, map types, name, compute vtable indices, emit render model
+│   ├── CHeader_Model.cs                     wanted-list, declarations and report records (the committed JSON shapes)
+│   ├── CHeader_Preprocessor.cs              D3: comments → #if/#ifdef/#elif/#else/#endif/#define/#undef/#pragma pack; #include reported, not followed
+│   ├── CHeader_Parser.cs                    D4 as built (§9 A1): tokenizer + recursive descent → declaration records (1:1, source line kept)
+│   ├── CHeader_Extractor.cs                 wanted list × parsed headers → declarations + report; exactly-once rule; HJSON via YeetJson
+│   ├── CHeader_AbiModel.cs                  D5: sizeof/offsetof per target ABI, C → C# type map
+│   └── CHeader_DeclarationCompiler.cs       normalize: validate, name (D8), layouts for every ABI, vtable slots, delegate* signatures → render model
 ├── CodeGen/
 │   ├── Wanted.ytdata.hjson                  §4
 │   ├── Declarations.ytdata.hjson            committed boundary
 │   ├── Extraction.report.json               hashes, skips, undeclared-symbol failures
 │   ├── Bindings.ytdata.hjson                render model (build output, committed like FluidUI)
-│   ├── Structs.cs.ytmpl  Enums.cs.ytmpl  Vtables.cs.ytmpl  Callbacks.cs.ytmpl  Layouts.cs.ytmpl
+│   ├── Enums.cs.ytmpl  Structs.cs.ytmpl  Vtables.cs.ytmpl  Layouts.cs.ytmpl      (callbacks are fn-ptr struct fields, §9 A3)
 ├── Generated/
-│   ├── Asio.Structs.generated.cs  Asio.Enums.generated.cs  Asio.Vtables.generated.cs  Asio.Callbacks.generated.cs  Asio.Layouts.generated.cs
+│   ├── Bindings.Enums.generated.cs  Bindings.Structs.generated.cs  Bindings.Vtables.generated.cs  Bindings.Layouts.generated.cs
 └── Platforms/Windows/Asio/                hand-written runtime (spec 70)
 ```
 

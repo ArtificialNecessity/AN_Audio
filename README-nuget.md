@@ -8,7 +8,7 @@ Cross-platform audio for .NET via direct PInvoke to the OS audio APIs — PCM ou
 
 | Package | Namespace | What it does | Depends on |
 | ------- | --------- | ------------ | ---------- |
-| **ArtificialNecessity.Audio** | `AN.Audio` | PCM output through WASAPI (Windows), AudioQueue (macOS), ALSA (Linux). One callback fills the device buffer; device enumeration, default-follow and hot-switch recovery included. | `.Audio.Common` |
+| **ArtificialNecessity.Audio** | `AN.Audio` | PCM output through WASAPI shared/exclusive or **ASIO** (Windows), AudioQueue (macOS), ALSA (Linux). One callback fills the device buffer; device enumeration, default-follow and hot-switch recovery included; low-latency modes report the period/latency they actually got. | `.Audio.Common` |
 | **ArtificialNecessity.Audio.Midi** | `AN.Audio.Midi` | MIDI input via WinMM `midiIn*` (macOS/Linux planned). Opens every port, merges them into one lock-free ring, hot-plug aware. MIDI 2.0-ready message contract. | nothing |
 | **ArtificialNecessity.Audio.Formats** | `AN.Audio.Formats` | Decodes **WAV** (PCM 8/16/24/32, float 32/64, EXTENSIBLE, `smpl`/`cue`/`LIST` metadata) and **FLAC** (with seeking, tags, MD5 verify) from any `Stream`, including forward-only network streams. MP3 next. 100 % managed. | `.Audio.Common` |
 | **ArtificialNecessity.Audio.Common** | `AN.Audio` | The shared PCM vocabulary the packages above speak: `AudioFormat`, `SampleFormat`, `AudioChannelMask`, `AudioBufferView`, `AudioSampleConvert`. Pulled in transitively; reference it directly only if you need the types without the rest. | nothing |
@@ -48,6 +48,13 @@ output.Stop();
 - Device outputs accept `SampleFormat.Int16` and `SampleFormat.Float32`.
 - `AudioOutput.Create(format, new AudioOutputOptions { ... })` selects a device and a switch policy (`FollowDefault` by default). `AudioOutput.GetDeviceManager()` enumerates devices and raises `DeviceListChanged`.
 - `DeviceFormatChanged`, `DeviceLost` and `DeviceSwitched` fire on a background thread — marshal to your UI yourself. `Stop()` blocks until the audio thread is quiescent; call it from a control thread, never from the callback.
+- **Low latency (Windows).** `Latency = AudioOutput_LatencyMode.LowLatency` asks the OS for its minimum shared period (typical consumer drivers still give 10 ms);
+  `Exclusive` takes the endpoint at the driver's minimum (2–3 ms when the endpoint allows exclusive mode). Read back `PeriodFrames`, `LatencyMs`,
+  `LatencyModeActual`, `LatencyFallbackReason`, `UnderrunCount` — the library falls back rather than throw.
+- **ASIO (Windows, opt-in).** `Backend = AudioOutput_Backend.Asio` (+ an `asio:{CLSID}` id from `AudioOutput.GetDeviceManager(AudioOutput_Backend.Asio)` in
+  `PreferredDevices`) drives the user's installed ASIO driver directly: the driver's preferred buffer size becomes `PeriodFrames` (MOTU M4: 128 → 3.5 ms, 32 → 1.6 ms),
+  `Asio_OutputChannelOffset` picks the hardware outputs, `Asio_SampleRate` defaults to keeping the device clock and resampling. Vendor-panel buffer changes are
+  followed automatically (`DeviceSwitched`); unplugging fires one `DeviceLost`. No Steinberg SDK code is shipped.
 
 | Platform | Backend | Status |
 | -------- | ------- | ------ |

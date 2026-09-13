@@ -38,6 +38,32 @@ operating system's audio stack.
 ✅ implemented   ◻ planned, interface shaped for it. **Audio capture is in scope**; it has simply not been sprinted yet.
 Earlier documents said "playback only" — that was sprint scope, not library scope.
 
+### Getting low-latency output (what to request, in order)
+
+Default `AudioOutput.Create(format)` is the safe media path (Windows ≈ 30 ms). A live instrument wants one of these, measured on the dev box (spec 60 §4.1, spec 70 §7):
+
+| you want | request | what you get / read back |
+|---|---|---|
+| OS shared path, smallest period the driver allows | `Latency = AudioOutput_LatencyMode.LowLatency` (+ `Processing = Raw`) | Windows `IAudioClient3` min period. **Consumer boxes usually offer nothing under 10 ms** (Realtek UAD, HDMI, virtual devices) → check `LatencyModeActual`/`PeriodFrames`. |
+| Exclusive device lock, driver's minimum period | `Latency = AudioOutput_LatencyMode.Exclusive` | 2–3 ms on a WaveRT driver **if** the endpoint allows exclusive mode (often unticked by vendor installers → `ExclusiveRefused`, falls back to LowLatency → Default). Nobody else can play through the endpoint. |
+| **A pro interface at its native low latency (ASIO)** | `Backend = AudioOutput_Backend.Asio` and, to pick a device, `PreferredDevices = [id]` where ids come from `AudioOutput.GetDeviceManager(AudioOutput_Backend.Asio)` (`asio:{CLSID}`) | The vendor driver's PREFERRED buffer size (set in its panel). MOTU M4: 128 → **3.5 ms**, 32 → **1.6 ms**. `LatencyModeActual = LowLatency`, `StreamProcessingActual = Raw`. Only chosen when asked — `Auto` never escalates to ASIO. |
+
+```csharp
+// ASIO when available, WASAPI exclusive otherwise — one Create, then read back what actually happened
+var asio = AudioOutput.GetDeviceManager(AudioOutput_Backend.Asio)?.GetOutputDevices();   // null off-Windows, empty when no driver
+var options = asio is { Count: > 0 }
+    ? new AudioOutputOptions { Backend = AudioOutput_Backend.Asio, PreferredDevices = [asio[0].Id] }
+    : new AudioOutputOptions { Latency = AudioOutput_LatencyMode.Exclusive, Processing = AudioOutput_StreamProcessing.Raw };
+using var output = AudioOutput.Create(new AudioFormat(48000, 2, SampleFormat.Float32), options);
+// output.PeriodFrames / LatencyMs / LatencyModeActual / LatencyFallbackReason / UnderrunCount tell the truth — show them in a status line.
+```
+
+ASIO rules that differ from WASAPI (spec 70): the buffer size is the driver's, not yours (`BufferSizeMs` ignored; change it in the vendor panel — the stream
+re-creates itself with a short gap and fires `DeviceSwitched`); the device sample rate is left alone by default (`Asio_SampleRate = AdoptDriverRate`,
+AN.Audio resamples — switching the hardware rate mutes the M4 for 1–2 s); `SwitchPolicy` has no meaning (no "default ASIO driver"); `Asio_OutputChannelOffset`
+targets outputs beyond 1/2; unplugging fires one `DeviceLost`. If `Create` throws "ASIO init failed" while Windows still lists the interface, the vendor's
+user-mode driver/panel is wedged (seen after a hot-unplug) — restart it; the library cannot.
+
 ## Repository shape
 
 ```
