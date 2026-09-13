@@ -1,6 +1,6 @@
 # 70 — ASIO output backend (Windows)
 
-- **Status:** Phases 1–2 **BUILT 2026-09-13**, hardware-validated on the MOTU M4 (§7.2). Phases 3–4 pending. Depends on `71_CHeader_Bindings_Autogen.md` (BUILT) for every struct/enum/vtable declaration.
+- **Status:** Phases 1–3 **BUILT 2026-09-13**, hardware-validated on the MOTU M4 (§7.2). Phases 3–4 pending. Depends on `71_CHeader_Bindings_Autogen.md` (BUILT) for every struct/enum/vtable declaration.
 - **Parent:** `00_AN_Audio_Overview.md`; extends `60_Low_Latency_Output.md` (whose §1 listed ASIO as a non-goal — amended by D1 below);
   device semantics from `20_Audio_Device_Management.md`.
 - **Ground truth:** Steinberg ASIO SDK 2.3.x at `C:\PROJECTS\3P_ASIOSDK` (`common/asiosys.h`, `common/asio.h`, `common/iasiodrv.h`), read
@@ -148,7 +148,7 @@ tests/SimpleAudioTest/Program.cs                 --asio [--asio-driver "MOTU M S
       `getChannels`, `getBufferSize`, `getLatencies`, `getChannelInfo`; `SimpleAudioTest --asio --probe` prints them for the M4. No audio yet.
 - [x] **Phase 2 — Output**: `createBuffers` (outputs), callbacks table, `Asio_PlanarWriter`, `AsioAudioOutput` Start/Stop/Dispose, D5–D9, D11, D12.
       440 Hz tone for 10 s on the M4: record `PeriodFrames`, `LatencyMs`, `UnderrunCount` in §7.
-- [ ] **Phase 3 — Reset/loss**: D13 is coded (`RequestReset`), NOT yet exercised: change buffer size in the M-Series panel while playing → seamless re-create; unplug → `DeviceLost`. D14.
+- [x] **Phase 3 — Reset/loss**: D13 exercised on hardware (§7.3 panel changes down to 32 frames, §7.4 hot-unplug → one `DeviceLost`, clean exit). D14 as coded.
 - [ ] **Phase 4 — Docs/consumers**: D2/D3 wiring is done (`AudioOutput.Create`, `GetDeviceManager(backend)`); pending: README (backend table row, trademark line §7), spec 60 §1/§9
       amendment, overview I1 note + matrix row, `_PROJECT_STRUCTURE.md`. MusicStudio opts in via `MUSICSTUDIO_AUDIO_BACKEND=asio`.
 
@@ -193,6 +193,15 @@ then it resumed". `kAsioResetRequest` is delivered on a driver thread (t5), neve
 | 128 | 128 = 2.90 ms | 3.76 ms |
 | 256 | 256 = 5.80 ms | 6.67 ms |
 | 512 | 512 = 11.61 ms | 12.47 ms |
+
+### 7.4 Phase 3 — hot-unplug while playing (D13 loss path), MOTU M4, 2026-09-13
+
+Unplugging the USB cable: the driver fires `kAsioResetRequest` **twice, on two different threads** (t5, t7); the first attempt reported `DeviceLost`
+twice. Fixed by coalescing pending resets (`_resetPending`) and latching `_lost` — now exactly **one** `DeviceLost(DeviceRemoved)`; the reset's
+`init(hwnd)` returns `ASIOFalse` with an EMPTY `getErrorMessage` from this driver; `Stop()`/`Dispose()` with the hardware gone return cleanly (I5), the
+process exits on schedule. Operational note: after a hot-unplug during an ASIO stream, the MOTU user-mode side (`MOTUMSeries.exe` panel +
+`MOTUCoreUACAudioPolicyMediator` service) stayed wedged — `init` kept failing while WASAPI still enumerated the M4 — until the user recovered it;
+not something the library can fix, but worth a consumer-facing hint when `Create` throws "ASIO init failed" for a driver whose hardware Windows sees.
 
 - Unit as in §5; hardware: `SimpleAudioTest --asio` on the M4 at panel sizes 32/64/128/256 — table of `PeriodFrames`, `LatencyMs`
   (`outputLatency`), `UnderrunCount` after 10 s, to be recorded here (mirrors 60 §4.1).

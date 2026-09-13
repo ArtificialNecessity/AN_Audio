@@ -35,6 +35,8 @@ internal sealed unsafe class AsioAudioOutput : IAudioOutput
     private volatile bool _running;
     private int _inCallback;                    // re-entrancy flag (D12)
     private long _underrunCount;
+    private int _resetPending;                  // coalesces duplicate kAsioResetRequest deliveries
+    private volatile bool _lost;                // D13: device gone — reported once, no further resets
     private bool _disposed;
 
     // ── IAudioOutput surface ──
@@ -192,9 +194,18 @@ internal sealed unsafe class AsioAudioOutput : IAudioOutput
     }
 
     /// <summary>D13: stop → disposeBuffers → re-read rate/size/types → createBuffers → start (if we were running), then tell the consumer.</summary>
-    private void RequestReset() => _host.PostToHost(() =>
+    private void RequestReset()
     {
-        if (_disposed) return;
+        // Drivers fire kAsioResetRequest more than once per event (unplugging the M4 produced two on different threads): coalesce, and never
+        // reset again once the device is lost (overview rule 8: report once, no retry loop).
+        if (_lost || Interlocked.Exchange(ref _resetPending, 1) == 1) return;
+        _host.PostToHost(PerformReset);
+    }
+
+    private void PerformReset()
+    {
+        Volatile.Write(ref _resetPending, 0);
+        if (_disposed || _lost) return;
         Asio_DriverHost.Log("reset: begin");
         bool wasRunning = _running;
         var oldFormat = _deviceFormat; int oldPeriod = _periodFrames;
@@ -213,10 +224,11 @@ internal sealed unsafe class AsioAudioOutput : IAudioOutput
         {
             // Hardware gone or driver in a bad mode: report once, stop (overview rule 8). Never silently.
             Asio_DriverHost.Log("reset FAILED: " + e);
+            _lost = true;
             _running = false; _callback = null;
             DeviceLost?.Invoke(DeviceLostReason.DeviceRemoved);
         }
-    });
+    }
 
     public void Dispose()
     {
