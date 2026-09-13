@@ -24,6 +24,55 @@
     <InternalsVisibleTo Include="AN.Audio.Tests" />
   </ItemGroup>
 
+  <!-- Spec 71: BindingsCompiler/ is a build-only tool, CodeGen/ holds its inputs/templates — neither is library source.
+       Generated/*.generated.cs IS library source (committed, never hand-edited). -->
+  <ItemGroup>
+    <Compile Remove="BindingsCompiler/**/*" />
+    <Compile Remove="CodeGen/**/*" />
+    <!-- Generated C# is committed. Explicitly included so a first build (file absent at evaluation) still compiles it. -->
+    <Compile Remove="Generated/*.generated.cs" />
+    <Compile Include="Generated/Bindings.Enums.generated.cs" />
+    <Compile Include="Generated/Bindings.Structs.generated.cs" />
+    <Compile Include="Generated/Bindings.Vtables.generated.cs" />
+    <Compile Include="Generated/Bindings.Layouts.generated.cs" />
+    <PackageReference Include="ArtificialNecessity.YeetCode.MSBuild" Version="[$(ANYeetCodeMsBuildVersion)]" PrivateAssets="all" />
+    <_BindingsCompilerSource Include="BindingsCompiler/*.cs;BindingsCompiler/*.csproj" />
+  </ItemGroup>
+
+  <!-- Spec 71 pipeline, ordinary build half. Runs ONCE per build (outer multi-TFM build, or the single inner build) so the three
+       TFM compilations never race on the same generated files. Extraction is NOT run here (explicit developer command). -->
+  <PropertyGroup>
+    <_BindingsGenOnce Condition="'$(TargetFramework)' == '' or '$(TargetFrameworks)' == ''">true</_BindingsGenOnce>
+  </PropertyGroup>
+  <!-- The outer build has no NuGet build/*.targets imports (they are per-TFM), so register YeetCodeTemplateTask ourselves there. -->
+  <Import Project="$(NuGetPackageRoot)artificialnecessity.yeetcode.msbuild/$(ANYeetCodeMsBuildVersion)/build/ArtificialNecessity.YeetCode.MSBuild.targets"
+          Condition="'$(TargetFramework)' == '' and '$(NuGetPackageRoot)' != '' and Exists('$(NuGetPackageRoot)artificialnecessity.yeetcode.msbuild/$(ANYeetCodeMsBuildVersion)/build/ArtificialNecessity.YeetCode.MSBuild.targets')" />
+
+  <Target Name="NormalizeBindingsDeclarations"
+          Condition="'$(_BindingsGenOnce)' == 'true' and '$(DesignTimeBuild)' != 'true'"
+          Inputs="CodeGen/Declarations.ytdata.hjson;@(_BindingsCompilerSource);$(MSBuildThisFileDirectory)../../AN.Audio.Build.props"
+          Outputs="CodeGen/Bindings.ytdata.hjson">
+    <Exec Command="dotnet run --project &quot;$(MSBuildProjectDirectory)/BindingsCompiler/AN.Audio.BindingsCompiler.csproj&quot; -- normalize &quot;$(MSBuildProjectDirectory)/CodeGen/Declarations.ytdata.hjson&quot; &quot;$(MSBuildProjectDirectory)/CodeGen/Bindings.ytdata.hjson&quot;" />
+  </Target>
+
+  <Target Name="GenerateBindings" BeforeTargets="DispatchToInnerBuilds;CoreCompile" DependsOnTargets="NormalizeBindingsDeclarations"
+          Condition="'$(_BindingsGenOnce)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <CallTarget Targets="GenerateBindingsEnums;GenerateBindingsStructs;GenerateBindingsVtables;GenerateBindingsLayouts" />
+  </Target>
+
+  <Target Name="GenerateBindingsEnums" Inputs="CodeGen/Bindings.ytdata.hjson;CodeGen/Enums.cs.ytmpl" Outputs="Generated/Bindings.Enums.generated.cs">
+    <YeetCodeTemplateTask DataFile="CodeGen/Bindings.ytdata.hjson" TemplateFile="CodeGen/Enums.cs.ytmpl" OutputFile="Generated/Bindings.Enums.generated.cs" />
+  </Target>
+  <Target Name="GenerateBindingsStructs" Inputs="CodeGen/Bindings.ytdata.hjson;CodeGen/Structs.cs.ytmpl" Outputs="Generated/Bindings.Structs.generated.cs">
+    <YeetCodeTemplateTask DataFile="CodeGen/Bindings.ytdata.hjson" TemplateFile="CodeGen/Structs.cs.ytmpl" OutputFile="Generated/Bindings.Structs.generated.cs" />
+  </Target>
+  <Target Name="GenerateBindingsVtables" Inputs="CodeGen/Bindings.ytdata.hjson;CodeGen/Vtables.cs.ytmpl" Outputs="Generated/Bindings.Vtables.generated.cs">
+    <YeetCodeTemplateTask DataFile="CodeGen/Bindings.ytdata.hjson" TemplateFile="CodeGen/Vtables.cs.ytmpl" OutputFile="Generated/Bindings.Vtables.generated.cs" />
+  </Target>
+  <Target Name="GenerateBindingsLayouts" Inputs="CodeGen/Bindings.ytdata.hjson;CodeGen/Layouts.cs.ytmpl" Outputs="Generated/Bindings.Layouts.generated.cs">
+    <YeetCodeTemplateTask DataFile="CodeGen/Bindings.ytdata.hjson" TemplateFile="CodeGen/Layouts.cs.ytmpl" OutputFile="Generated/Bindings.Layouts.generated.cs" />
+  </Target>
+
   <ItemGroup>
     <ProjectReference Include="../AN.Audio.Common/AN.Audio.Common.csproj" />
   </ItemGroup>

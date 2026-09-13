@@ -1,0 +1,50 @@
+// AN.Audio bindings — explicit extraction input (spec 71 §4). Names WHICH header declarations we bind and how they are keyed
+// in C#; contains NO layouts, NO vtable slots, NO enum values — those come from the headers during `extract` and from the
+// ABI model during `normalize`.
+//
+//   dotnet run --project src/AN.Audio/BindingsCompiler -- extract src/AN.Audio/CodeGen/Wanted.ytdata.hjson src/AN.Audio/CodeGen/Declarations.ytdata.hjson src/AN.Audio/CodeGen/Extraction.report.json
+{
+  schemaVersion: 1
+  surfaces: [
+    {
+      // ── ASIO (spec 70) — Steinberg ASIO SDK 2.3.x, user-installed, never redistributed (3P_ convention) ──
+      name: Asio
+      csPrefix: Asio_
+      stripPrefixes: [ASIO, Asio]         // ASIOChannelInfo → Asio_ChannelInfo, AsioTimeInfo → Asio_TimeInfo
+      csNamespace: AN.Audio.Platforms.Windows.Asio
+      sdkRoot: C:/PROJECTS/3P_ASIOSDK      // extract-time only; --sdk-root overrides; never written to the report
+      abis: [msvc-x64, msvc-x86]           // AnyCPU: both layouts asserted at runtime (D5)
+
+      // D3: the preprocessor evaluates #if against THESE and against #defines the headers themselves introduce (asiosys.h).
+      // An #if that names anything else fails extraction. Values are C token text.
+      defines: {
+        _WIN32: "1"
+        _MSC_VER: "1930"
+        // asiosys.h derives these from _WIN32; authored too so the agreement check (header vs wanted) documents the intent
+        WINDOWS: "1"
+        NATIVE_INT64: "0"                 // ASIOSamples/ASIOTimeStamp are {hi,lo} structs on Windows, not long long
+        IEEE754_64FLOAT: "1"              // ASIOSampleRate is double
+      }
+
+      // Processing order matters: asiosys.h defines what asio.h tests. #include is NOT followed (reported instead).
+      headers: [common/asiosys.h, common/asio.h, common/iasiodrv.h]
+
+      typedefs: [ASIOBool, ASIOError, ASIOSampleType, ASIOSampleRate]
+      structs: [ASIOSamples, ASIOTimeStamp, ASIOClockSource, ASIOChannelInfo, ASIOBufferInfo, ASIOTimeCode, AsioTimeInfo, ASIOTime, ASIOCallbacks]
+      enums: [
+        // anonymous enums (the ASIO norm) are identified by their FIRST enumerator; the `typedef` binds uses of that C typedef to the enum
+        { firstEntry: ASIOFalse,               csName: Asio_Bool,           typedef: ASIOBool }
+        { firstEntry: ASIOSTInt16MSB,          csName: Asio_SampleType,     typedef: ASIOSampleType }
+        { firstEntry: ASE_OK,                  csName: Asio_Error,          typedef: ASIOError }
+        { firstEntry: kAsioSelectorSupported,  csName: Asio_MessageSelector }
+        { firstEntry: kAsioEnableTimeCodeRead, csName: Asio_FutureSelector }
+        { name: ASIOTimeCodeFlags,             csName: Asio_TimeCodeFlags,  flags: true }
+        { name: AsioTimeInfoFlags,             csName: Asio_TimeInfoFlags,  flags: true }
+      ]
+      classes: [
+        // C++ class, not a COM interface: slots 0-2 are stdcall IUnknown, own virtuals are THISCALL (moot on x64, real on x86)
+        { name: IASIO, base: IUnknown, baseSlots: 3, callConv: thiscall, csName: Asio_Driver }
+      ]
+    }
+  ]
+}

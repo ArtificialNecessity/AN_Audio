@@ -8,6 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks> <!-- generated interop struct sizeof/vtable tests (spec 71) -->
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,6 +19,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AN.Audio\AN.Audio.csproj" />
+    <!-- Spec 71: the bindings compiler is tested here (fixture headers, ABI model). Never linked by the library itself. -->
+    <ProjectReference Include="..\..\src\AN.Audio\BindingsCompiler\AN.Audio.BindingsCompiler.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Interop\abi-probe.cpp" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

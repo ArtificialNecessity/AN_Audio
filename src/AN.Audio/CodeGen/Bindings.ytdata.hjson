@@ -1,0 +1,1811 @@
+{
+  "toolVersion": "AN.Audio.BindingsCompiler 0.1 (spec 71)",
+  "surfaces": [
+    {
+      "name": "Asio",
+      "csNamespace": "AN.Audio.Platforms.Windows.Asio",
+      "csPrefix": "Asio_",
+      "layoutsCsName": "Asio_Layouts",
+      "headers": [
+        {
+          "path": "common/asiosys.h",
+          "sha256": "f44a1ed0fd7c056ff047aeebc4c05a8c185f0585a24d8debc55c70107777dbef"
+        },
+        {
+          "path": "common/asio.h",
+          "sha256": "93d2f80d49b4ac9c963514e7c1307ab5111d8104246192233745beb058534ea1"
+        },
+        {
+          "path": "common/iasiodrv.h",
+          "sha256": "86ad4788452c74823653cf57d4bd557c48bb6542d7e6eb7fff80102c705a066d"
+        }
+      ],
+      "abis": [
+        {
+          "name": "msvc-x64",
+          "runtimeCondition": "sizeof(nint) == 8",
+          "isPrimary": true
+        },
+        {
+          "name": "msvc-x86",
+          "runtimeCondition": "sizeof(nint) == 4",
+          "isPrimary": false
+        }
+      ],
+      "enums": [
+        {
+          "csName": "Asio_Bool",
+          "typedef": "ASIOBool",
+          "flags": false,
+          "underlying": "int",
+          "header": "common/asio.h",
+          "line": 131,
+          "entries": [
+            {
+              "name": "ASIOFalse",
+              "value": 0,
+              "expression": "0"
+            },
+            {
+              "name": "ASIOTrue",
+              "value": 1,
+              "expression": "1"
+            }
+          ]
+        },
+        {
+          "csName": "Asio_SampleType",
+          "typedef": "ASIOSampleType",
+          "flags": false,
+          "underlying": "int",
+          "header": "common/asio.h",
+          "line": 138,
+          "entries": [
+            {
+              "name": "ASIOSTInt16MSB",
+              "value": 0,
+              "expression": "0"
+            },
+            {
+              "name": "ASIOSTInt24MSB",
+              "value": 1,
+              "expression": "1"
+            },
+            {
+              "name": "ASIOSTInt32MSB",
+              "value": 2,
+              "expression": "2"
+            },
+            {
+              "name": "ASIOSTFloat32MSB",
+              "value": 3,
+              "expression": "3"
+            },
+            {
+              "name": "ASIOSTFloat64MSB",
+              "value": 4,
+              "expression": "4"
+            },
+            {
+              "name": "ASIOSTInt32MSB16",
+              "value": 8,
+              "expression": "8"
+            },
+            {
+              "name": "ASIOSTInt32MSB18",
+              "value": 9,
+              "expression": "9"
+            },
+            {
+              "name": "ASIOSTInt32MSB20",
+              "value": 10,
+              "expression": "10"
+            },
+            {
+              "name": "ASIOSTInt32MSB24",
+              "value": 11,
+              "expression": "11"
+            },
+            {
+              "name": "ASIOSTInt16LSB",
+              "value": 16,
+              "expression": "16"
+            },
+            {
+              "name": "ASIOSTInt24LSB",
+              "value": 17,
+              "expression": "17"
+            },
+            {
+              "name": "ASIOSTInt32LSB",
+              "value": 18,
+              "expression": "18"
+            },
+            {
+              "name": "ASIOSTFloat32LSB",
+              "value": 19,
+              "expression": "19"
+            },
+            {
+              "name": "ASIOSTFloat64LSB",
+              "value": 20,
+              "expression": "20"
+            },
+            {
+              "name": "ASIOSTInt32LSB16",
+              "value": 24,
+              "expression": "24"
+            },
+            {
+              "name": "ASIOSTInt32LSB18",
+              "value": 25,
+              "expression": "25"
+            },
+            {
+              "name": "ASIOSTInt32LSB20",
+              "value": 26,
+              "expression": "26"
+            },
+            {
+              "name": "ASIOSTInt32LSB24",
+              "value": 27,
+              "expression": "27"
+            },
+            {
+              "name": "ASIOSTDSDInt8LSB1",
+              "value": 32,
+              "expression": "32"
+            },
+            {
+              "name": "ASIOSTDSDInt8MSB1",
+              "value": 33,
+              "expression": "33"
+            },
+            {
+              "name": "ASIOSTDSDInt8NER8",
+              "value": 40,
+              "expression": "40"
+            },
+            {
+              "name": "ASIOSTLastEntry",
+              "value": 41
+            }
+          ]
+        },
+        {
+          "csName": "Asio_Error",
+          "typedef": "ASIOError",
+          "flags": false,
+          "underlying": "int",
+          "header": "common/asio.h",
+          "line": 218,
+          "entries": [
+            {
+              "name": "ASE_OK",
+              "value": 0,
+              "expression": "0"
+            },
+            {
+              "name": "ASE_SUCCESS",
+              "value": 1061701536,
+              "expression": "0x3f4847a0"
+            },
+            {
+              "name": "ASE_NotPresent",
+              "value": -1000,
+              "expression": "- 1000"
+            },
+            {
+              "name": "ASE_HWMalfunction",
+              "value": -999
+            },
+            {
+              "name": "ASE_InvalidParameter",
+              "value": -998
+            },
+            {
+              "name": "ASE_InvalidMode",
+              "value": -997
+            },
+            {
+              "name": "ASE_SPNotAdvancing",
+              "value": -996
+            },
+            {
+              "name": "ASE_NoClock",
+              "value": -995
+            },
+            {
+              "name": "ASE_NoMemory",
+              "value": -994
+            }
+          ]
+        },
+        {
+          "csName": "Asio_MessageSelector",
+          "flags": false,
+          "underlying": "int",
+          "header": "common/asio.h",
+          "line": 437,
+          "entries": [
+            {
+              "name": "kAsioSelectorSupported",
+              "value": 1,
+              "expression": "1"
+            },
+            {
+              "name": "kAsioEngineVersion",
+              "value": 2
+            },
+            {
+              "name": "kAsioResetRequest",
+              "value": 3
+            },
+            {
+              "name": "kAsioBufferSizeChange",
+              "value": 4
+            },
+            {
+              "name": "kAsioResyncRequest",
+              "value": 5
+            },
+            {
+              "name": "kAsioLatenciesChanged",
+              "value": 6
+            },
+            {
+              "name": "kAsioSupportsTimeInfo",
+              "value": 7
+            },
+            {
+              "name": "kAsioSupportsTimeCode",
+              "value": 8
+            },
+            {
+              "name": "kAsioMMCCommand",
+              "value": 9
+            },
+            {
+              "name": "kAsioSupportsInputMonitor",
+              "value": 10
+            },
+            {
+              "name": "kAsioSupportsInputGain",
+              "value": 11
+            },
+            {
+              "name": "kAsioSupportsInputMeter",
+              "value": 12
+            },
+            {
+              "name": "kAsioSupportsOutputGain",
+              "value": 13
+            },
+            {
+              "name": "kAsioSupportsOutputMeter",
+              "value": 14
+            },
+            {
+              "name": "kAsioOverload",
+              "value": 15
+            },
+            {
+              "name": "kAsioNumMessageSelectors",
+              "value": 16
+            }
+          ]
+        },
+        {
+          "csName": "Asio_FutureSelector",
+          "flags": false,
+          "underlying": "int",
+          "header": "common/asio.h",
+          "line": 912,
+          "entries": [
+            {
+              "name": "kAsioEnableTimeCodeRead",
+              "value": 1,
+              "expression": "1"
+            },
+            {
+              "name": "kAsioDisableTimeCodeRead",
+              "value": 2
+            },
+            {
+              "name": "kAsioSetInputMonitor",
+              "value": 3
+            },
+            {
+              "name": "kAsioTransport",
+              "value": 4
+            },
+            {
+              "name": "kAsioSetInputGain",
+              "value": 5
+            },
+            {
+              "name": "kAsioGetInputMeter",
+              "value": 6
+            },
+            {
+              "name": "kAsioSetOutputGain",
+              "value": 7
+            },
+            {
+              "name": "kAsioGetOutputMeter",
+              "value": 8
+            },
+            {
+              "name": "kAsioCanInputMonitor",
+              "value": 9
+            },
+            {
+              "name": "kAsioCanTimeInfo",
+              "value": 10
+            },
+            {
+              "name": "kAsioCanTimeCode",
+              "value": 11
+            },
+            {
+              "name": "kAsioCanTransport",
+              "value": 12
+            },
+            {
+              "name": "kAsioCanInputGain",
+              "value": 13
+            },
+            {
+              "name": "kAsioCanInputMeter",
+              "value": 14
+            },
+            {
+              "name": "kAsioCanOutputGain",
+              "value": 15
+            },
+            {
+              "name": "kAsioCanOutputMeter",
+              "value": 16
+            },
+            {
+              "name": "kAsioOptionalOne",
+              "value": 17
+            },
+            {
+              "name": "kAsioSetIoFormat",
+              "value": 588323169,
+              "expression": "0x23111961"
+            },
+            {
+              "name": "kAsioGetIoFormat",
+              "value": 588323203,
+              "expression": "0x23111983"
+            },
+            {
+              "name": "kAsioCanDoIoFormat",
+              "value": 588324868,
+              "expression": "0x23112004"
+            },
+            {
+              "name": "kAsioCanReportOverload",
+              "value": 604250130,
+              "expression": "0x24042012"
+            },
+            {
+              "name": "kAsioGetInternalBufferSamples",
+              "value": 621027346,
+              "expression": "0x25042012"
+            }
+          ]
+        },
+        {
+          "csName": "Asio_TimeCodeFlags",
+          "headerName": "ASIOTimeCodeFlags",
+          "flags": true,
+          "underlying": "int",
+          "header": "common/asio.h",
+          "line": 247,
+          "entries": [
+            {
+              "name": "kTcValid",
+              "value": 1,
+              "expression": "1"
+            },
+            {
+              "name": "kTcRunning",
+              "value": 2,
+              "expression": "1 << 1"
+            },
+            {
+              "name": "kTcReverse",
+              "value": 4,
+              "expression": "1 << 2"
+            },
+            {
+              "name": "kTcOnspeed",
+              "value": 8,
+              "expression": "1 << 3"
+            },
+            {
+              "name": "kTcStill",
+              "value": 16,
+              "expression": "1 << 4"
+            },
+            {
+              "name": "kTcSpeedValid",
+              "value": 256,
+              "expression": "1 << 8"
+            }
+          ]
+        },
+        {
+          "csName": "Asio_TimeInfoFlags",
+          "headerName": "AsioTimeInfoFlags",
+          "flags": true,
+          "underlying": "int",
+          "header": "common/asio.h",
+          "line": 270,
+          "entries": [
+            {
+              "name": "kSystemTimeValid",
+              "value": 1,
+              "expression": "1"
+            },
+            {
+              "name": "kSamplePositionValid",
+              "value": 2,
+              "expression": "1 << 1"
+            },
+            {
+              "name": "kSampleRateValid",
+              "value": 4,
+              "expression": "1 << 2"
+            },
+            {
+              "name": "kSpeedValid",
+              "value": 8,
+              "expression": "1 << 3"
+            },
+            {
+              "name": "kSampleRateChanged",
+              "value": 16,
+              "expression": "1 << 4"
+            },
+            {
+              "name": "kClockSourceChanged",
+              "value": 32,
+              "expression": "1 << 5"
+            }
+          ]
+        }
+      ],
+      "structs": [
+        {
+          "csName": "Asio_Samples",
+          "headerName": "ASIOSamples",
+          "pack": 4,
+          "header": "common/asio.h",
+          "line": 102,
+          "fields": [
+            {
+              "name": "hi",
+              "csName": "Hi",
+              "csType": "uint",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "unsigned long hi",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "lo",
+              "csName": "Lo",
+              "csType": "uint",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "unsigned long lo",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            }
+          ],
+          "layouts": [
+            {
+              "abi": "msvc-x64",
+              "runtimeCondition": "sizeof(nint) == 8",
+              "size": 8,
+              "offsets": [
+                {
+                  "csName": "Hi",
+                  "offset": 0
+                },
+                {
+                  "csName": "Lo",
+                  "offset": 4
+                }
+              ]
+            },
+            {
+              "abi": "msvc-x86",
+              "runtimeCondition": "sizeof(nint) == 4",
+              "size": 8,
+              "offsets": [
+                {
+                  "csName": "Hi",
+                  "offset": 0
+                },
+                {
+                  "csName": "Lo",
+                  "offset": 4
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "csName": "Asio_TimeStamp",
+          "headerName": "ASIOTimeStamp",
+          "pack": 4,
+          "header": "common/asio.h",
+          "line": 113,
+          "fields": [
+            {
+              "name": "hi",
+              "csName": "Hi",
+              "csType": "uint",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "unsigned long hi",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "lo",
+              "csName": "Lo",
+              "csType": "uint",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "unsigned long lo",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            }
+          ],
+          "layouts": [
+            {
+              "abi": "msvc-x64",
+              "runtimeCondition": "sizeof(nint) == 8",
+              "size": 8,
+              "offsets": [
+                {
+                  "csName": "Hi",
+                  "offset": 0
+                },
+                {
+                  "csName": "Lo",
+                  "offset": 4
+                }
+              ]
+            },
+            {
+              "abi": "msvc-x86",
+              "runtimeCondition": "sizeof(nint) == 4",
+              "size": 8,
+              "offsets": [
+                {
+                  "csName": "Hi",
+                  "offset": 0
+                },
+                {
+                  "csName": "Lo",
+                  "offset": 4
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "csName": "Asio_ClockSource",
+          "headerName": "ASIOClockSource",
+          "pack": 4,
+          "header": "common/asio.h",
+          "line": 688,
+          "fields": [
+            {
+              "name": "index",
+              "csName": "Index",
+              "csType": "int",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "long index",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "associatedChannel",
+              "csName": "AssociatedChannel",
+              "csType": "int",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "long associatedChannel",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "associatedGroup",
+              "csName": "AssociatedGroup",
+              "csType": "int",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "long associatedGroup",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "isCurrentSource",
+              "csName": "IsCurrentSource",
+              "csType": "Asio_Bool",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "ASIOBool isCurrentSource",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "name",
+              "csName": "Name",
+              "csType": "byte",
+              "isFixed": true,
+              "fixedElementType": "byte",
+              "arrayLength": 32,
+              "isFunctionPointer": false,
+              "cDecl": "char name[32]",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            }
+          ],
+          "layouts": [
+            {
+              "abi": "msvc-x64",
+              "runtimeCondition": "sizeof(nint) == 8",
+              "size": 48,
+              "offsets": [
+                {
+                  "csName": "Index",
+                  "offset": 0
+                },
+                {
+                  "csName": "AssociatedChannel",
+                  "offset": 4
+                },
+                {
+                  "csName": "AssociatedGroup",
+                  "offset": 8
+                },
+                {
+                  "csName": "IsCurrentSource",
+                  "offset": 12
+                },
+                {
+                  "csName": "Name",
+                  "offset": 16
+                }
+              ]
+            },
+            {
+              "abi": "msvc-x86",
+              "runtimeCondition": "sizeof(nint) == 4",
+              "size": 48,
+              "offsets": [
+                {
+                  "csName": "Index",
+                  "offset": 0
+                },
+                {
+                  "csName": "AssociatedChannel",
+                  "offset": 4
+                },
+                {
+                  "csName": "AssociatedGroup",
+                  "offset": 8
+                },
+                {
+                  "csName": "IsCurrentSource",
+                  "offset": 12
+                },
+                {
+                  "csName": "Name",
+                  "offset": 16
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "csName": "Asio_ChannelInfo",
+          "headerName": "ASIOChannelInfo",
+          "pack": 4,
+          "header": "common/asio.h",
+          "line": 776,
+          "fields": [
+            {
+              "name": "channel",
+              "csName": "Channel",
+              "csType": "int",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "long channel",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "isInput",
+              "csName": "IsInput",
+              "csType": "Asio_Bool",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "ASIOBool isInput",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "isActive",
+              "csName": "IsActive",
+              "csType": "Asio_Bool",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "ASIOBool isActive",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "channelGroup",
+              "csName": "ChannelGroup",
+              "csType": "int",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "long channelGroup",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "type",
+              "csName": "Type",
+              "csType": "Asio_SampleType",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "ASIOSampleType type",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "name",
+              "csName": "Name",
+              "csType": "byte",
+              "isFixed": true,
+              "fixedElementType": "byte",
+              "arrayLength": 32,
+              "isFunctionPointer": false,
+              "cDecl": "char name[32]",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            }
+          ],
+          "layouts": [
+            {
+              "abi": "msvc-x64",
+              "runtimeCondition": "sizeof(nint) == 8",
+              "size": 52,
+              "offsets": [
+                {
+                  "csName": "Channel",
+                  "offset": 0
+                },
+                {
+                  "csName": "IsInput",
+                  "offset": 4
+                },
+                {
+                  "csName": "IsActive",
+                  "offset": 8
+                },
+                {
+                  "csName": "ChannelGroup",
+                  "offset": 12
+                },
+                {
+                  "csName": "Type",
+                  "offset": 16
+                },
+                {
+                  "csName": "Name",
+                  "offset": 20
+                }
+              ]
+            },
+            {
+              "abi": "msvc-x86",
+              "runtimeCondition": "sizeof(nint) == 4",
+              "size": 52,
+              "offsets": [
+                {
+                  "csName": "Channel",
+                  "offset": 0
+                },
+                {
+                  "csName": "IsInput",
+                  "offset": 4
+                },
+                {
+                  "csName": "IsActive",
+                  "offset": 8
+                },
+                {
+                  "csName": "ChannelGroup",
+                  "offset": 12
+                },
+                {
+                  "csName": "Type",
+                  "offset": 16
+                },
+                {
+                  "csName": "Name",
+                  "offset": 20
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "csName": "Asio_BufferInfo",
+          "headerName": "ASIOBufferInfo",
+          "pack": 4,
+          "header": "common/asio.h",
+          "line": 825,
+          "fields": [
+            {
+              "name": "isInput",
+              "csName": "IsInput",
+              "csType": "Asio_Bool",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "ASIOBool isInput",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "channelNum",
+              "csName": "ChannelNum",
+              "csType": "int",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "long channelNum",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "buffers0",
+              "csName": "Buffers0",
+              "csType": "nint",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "void* buffers[2]",
+              "isExpandedArrayElement": true,
+              "expandedIndex": 0
+            },
+            {
+              "name": "buffers1",
+              "csName": "Buffers1",
+              "csType": "nint",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "void* buffers[2] (cont.)",
+              "isExpandedArrayElement": true,
+              "expandedIndex": 1
+            }
+          ],
+          "layouts": [
+            {
+              "abi": "msvc-x64",
+              "runtimeCondition": "sizeof(nint) == 8",
+              "size": 24,
+              "offsets": [
+                {
+                  "csName": "IsInput",
+                  "offset": 0
+                },
+                {
+                  "csName": "ChannelNum",
+                  "offset": 4
+                },
+                {
+                  "csName": "Buffers0",
+                  "offset": 8
+                },
+                {
+                  "csName": "Buffers1",
+                  "offset": 16
+                }
+              ]
+            },
+            {
+              "abi": "msvc-x86",
+              "runtimeCondition": "sizeof(nint) == 4",
+              "size": 16,
+              "offsets": [
+                {
+                  "csName": "IsInput",
+                  "offset": 0
+                },
+                {
+                  "csName": "ChannelNum",
+                  "offset": 4
+                },
+                {
+                  "csName": "Buffers0",
+                  "offset": 8
+                },
+                {
+                  "csName": "Buffers1",
+                  "offset": 12
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "csName": "Asio_TimeCode",
+          "headerName": "ASIOTimeCode",
+          "pack": 4,
+          "header": "common/asio.h",
+          "line": 238,
+          "fields": [
+            {
+              "name": "speed",
+              "csName": "Speed",
+              "csType": "double",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "double speed",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "timeCodeSamples",
+              "csName": "TimeCodeSamples",
+              "csType": "Asio_Samples",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "ASIOSamples timeCodeSamples",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "flags",
+              "csName": "Flags",
+              "csType": "uint",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "unsigned long flags",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "future",
+              "csName": "Future",
+              "csType": "byte",
+              "isFixed": true,
+              "fixedElementType": "byte",
+              "arrayLength": 64,
+              "isFunctionPointer": false,
+              "cDecl": "char future[64]",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            }
+          ],
+          "layouts": [
+            {
+              "abi": "msvc-x64",
+              "runtimeCondition": "sizeof(nint) == 8",
+              "size": 84,
+              "offsets": [
+                {
+                  "csName": "Speed",
+                  "offset": 0
+                },
+                {
+                  "csName": "TimeCodeSamples",
+                  "offset": 8
+                },
+                {
+                  "csName": "Flags",
+                  "offset": 16
+                },
+                {
+                  "csName": "Future",
+                  "offset": 20
+                }
+              ]
+            },
+            {
+              "abi": "msvc-x86",
+              "runtimeCondition": "sizeof(nint) == 4",
+              "size": 84,
+              "offsets": [
+                {
+                  "csName": "Speed",
+                  "offset": 0
+                },
+                {
+                  "csName": "TimeCodeSamples",
+                  "offset": 8
+                },
+                {
+                  "csName": "Flags",
+                  "offset": 16
+                },
+                {
+                  "csName": "Future",
+                  "offset": 20
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "csName": "Asio_TimeInfo",
+          "headerName": "AsioTimeInfo",
+          "pack": 4,
+          "header": "common/asio.h",
+          "line": 258,
+          "fields": [
+            {
+              "name": "speed",
+              "csName": "Speed",
+              "csType": "double",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "double speed",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "systemTime",
+              "csName": "SystemTime",
+              "csType": "Asio_TimeStamp",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "ASIOTimeStamp systemTime",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "samplePosition",
+              "csName": "SamplePosition",
+              "csType": "Asio_Samples",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "ASIOSamples samplePosition",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "sampleRate",
+              "csName": "SampleRate",
+              "csType": "double",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "ASIOSampleRate sampleRate",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "flags",
+              "csName": "Flags",
+              "csType": "uint",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "unsigned long flags",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "reserved",
+              "csName": "Reserved",
+              "csType": "byte",
+              "isFixed": true,
+              "fixedElementType": "byte",
+              "arrayLength": 12,
+              "isFunctionPointer": false,
+              "cDecl": "char reserved[12]",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            }
+          ],
+          "layouts": [
+            {
+              "abi": "msvc-x64",
+              "runtimeCondition": "sizeof(nint) == 8",
+              "size": 48,
+              "offsets": [
+                {
+                  "csName": "Speed",
+                  "offset": 0
+                },
+                {
+                  "csName": "SystemTime",
+                  "offset": 8
+                },
+                {
+                  "csName": "SamplePosition",
+                  "offset": 16
+                },
+                {
+                  "csName": "SampleRate",
+                  "offset": 24
+                },
+                {
+                  "csName": "Flags",
+                  "offset": 32
+                },
+                {
+                  "csName": "Reserved",
+                  "offset": 36
+                }
+              ]
+            },
+            {
+              "abi": "msvc-x86",
+              "runtimeCondition": "sizeof(nint) == 4",
+              "size": 48,
+              "offsets": [
+                {
+                  "csName": "Speed",
+                  "offset": 0
+                },
+                {
+                  "csName": "SystemTime",
+                  "offset": 8
+                },
+                {
+                  "csName": "SamplePosition",
+                  "offset": 16
+                },
+                {
+                  "csName": "SampleRate",
+                  "offset": 24
+                },
+                {
+                  "csName": "Flags",
+                  "offset": 32
+                },
+                {
+                  "csName": "Reserved",
+                  "offset": 36
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "csName": "Asio_Time",
+          "headerName": "ASIOTime",
+          "pack": 4,
+          "header": "common/asio.h",
+          "line": 281,
+          "fields": [
+            {
+              "name": "reserved",
+              "csName": "Reserved",
+              "csType": "int",
+              "isFixed": true,
+              "fixedElementType": "int",
+              "arrayLength": 4,
+              "isFunctionPointer": false,
+              "cDecl": "long reserved[4]",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "timeInfo",
+              "csName": "TimeInfo",
+              "csType": "Asio_TimeInfo",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "AsioTimeInfo timeInfo",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "timeCode",
+              "csName": "TimeCode",
+              "csType": "Asio_TimeCode",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": false,
+              "cDecl": "ASIOTimeCode timeCode",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            }
+          ],
+          "layouts": [
+            {
+              "abi": "msvc-x64",
+              "runtimeCondition": "sizeof(nint) == 8",
+              "size": 148,
+              "offsets": [
+                {
+                  "csName": "Reserved",
+                  "offset": 0
+                },
+                {
+                  "csName": "TimeInfo",
+                  "offset": 16
+                },
+                {
+                  "csName": "TimeCode",
+                  "offset": 64
+                }
+              ]
+            },
+            {
+              "abi": "msvc-x86",
+              "runtimeCondition": "sizeof(nint) == 4",
+              "size": 148,
+              "offsets": [
+                {
+                  "csName": "Reserved",
+                  "offset": 0
+                },
+                {
+                  "csName": "TimeInfo",
+                  "offset": 16
+                },
+                {
+                  "csName": "TimeCode",
+                  "offset": 64
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "csName": "Asio_Callbacks",
+          "headerName": "ASIOCallbacks",
+          "pack": 4,
+          "header": "common/asio.h",
+          "line": 401,
+          "fields": [
+            {
+              "name": "bufferSwitch",
+              "csName": "BufferSwitch",
+              "csType": "delegate* unmanaged[Cdecl]<int, Asio_Bool, void>",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": true,
+              "cDecl": "void (*bufferSwitch)(long doubleBufferIndex, ASIOBool directProcess)",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "sampleRateDidChange",
+              "csName": "SampleRateDidChange",
+              "csType": "delegate* unmanaged[Cdecl]<double, void>",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": true,
+              "cDecl": "void (*sampleRateDidChange)(ASIOSampleRate sRate)",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "asioMessage",
+              "csName": "AsioMessage",
+              "csType": "delegate* unmanaged[Cdecl]<int, int, void*, double*, int>",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": true,
+              "cDecl": "long (*asioMessage)(long selector, long value, void* message, double* opt)",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            },
+            {
+              "name": "bufferSwitchTimeInfo",
+              "csName": "BufferSwitchTimeInfo",
+              "csType": "delegate* unmanaged[Cdecl]<Asio_Time*, int, Asio_Bool, Asio_Time*>",
+              "isFixed": false,
+              "arrayLength": 0,
+              "isFunctionPointer": true,
+              "cDecl": "ASIOTime* (*bufferSwitchTimeInfo)(ASIOTime* params, long doubleBufferIndex, ASIOBool directProcess)",
+              "isExpandedArrayElement": false,
+              "expandedIndex": 0
+            }
+          ],
+          "layouts": [
+            {
+              "abi": "msvc-x64",
+              "runtimeCondition": "sizeof(nint) == 8",
+              "size": 32,
+              "offsets": [
+                {
+                  "csName": "BufferSwitch",
+                  "offset": 0
+                },
+                {
+                  "csName": "SampleRateDidChange",
+                  "offset": 8
+                },
+                {
+                  "csName": "AsioMessage",
+                  "offset": 16
+                },
+                {
+                  "csName": "BufferSwitchTimeInfo",
+                  "offset": 24
+                }
+              ]
+            },
+            {
+              "abi": "msvc-x86",
+              "runtimeCondition": "sizeof(nint) == 4",
+              "size": 16,
+              "offsets": [
+                {
+                  "csName": "BufferSwitch",
+                  "offset": 0
+                },
+                {
+                  "csName": "SampleRateDidChange",
+                  "offset": 4
+                },
+                {
+                  "csName": "AsioMessage",
+                  "offset": 8
+                },
+                {
+                  "csName": "BufferSwitchTimeInfo",
+                  "offset": 12
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "classes": [
+        {
+          "csName": "Asio_Driver",
+          "headerName": "IASIO",
+          "base": "IUnknown",
+          "baseSlots": 3,
+          "callConv": "Thiscall",
+          "baseIsIUnknown": true,
+          "header": "common/iasiodrv.h",
+          "line": 27,
+          "methods": [
+            {
+              "name": "init",
+              "csName": "Init",
+              "slot": 3,
+              "csReturn": "Asio_Bool",
+              "returnsVoid": false,
+              "params": [
+                {
+                  "name": "sysHandle",
+                  "csType": "void*",
+                  "cType": "void*"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, void*, Asio_Bool>",
+              "paramList": "nint self, void* sysHandle",
+              "argList": "self, sysHandle",
+              "cDecl": "ASIOBool init(void* sysHandle)"
+            },
+            {
+              "name": "getDriverName",
+              "csName": "GetDriverName",
+              "slot": 4,
+              "csReturn": "void",
+              "returnsVoid": true,
+              "params": [
+                {
+                  "name": "name",
+                  "csType": "byte*",
+                  "cType": "char*"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, byte*, void>",
+              "paramList": "nint self, byte* name",
+              "argList": "self, name",
+              "cDecl": "void getDriverName(char* name)"
+            },
+            {
+              "name": "getDriverVersion",
+              "csName": "GetDriverVersion",
+              "slot": 5,
+              "csReturn": "int",
+              "returnsVoid": false,
+              "params": [],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, int>",
+              "paramList": "nint self",
+              "argList": "self",
+              "cDecl": "long getDriverVersion()"
+            },
+            {
+              "name": "getErrorMessage",
+              "csName": "GetErrorMessage",
+              "slot": 6,
+              "csReturn": "void",
+              "returnsVoid": true,
+              "params": [
+                {
+                  "name": "@string",
+                  "csType": "byte*",
+                  "cType": "char*"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, byte*, void>",
+              "paramList": "nint self, byte* @string",
+              "argList": "self, @string",
+              "cDecl": "void getErrorMessage(char* string)"
+            },
+            {
+              "name": "start",
+              "csName": "Start",
+              "slot": 7,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, Asio_Error>",
+              "paramList": "nint self",
+              "argList": "self",
+              "cDecl": "ASIOError start()"
+            },
+            {
+              "name": "stop",
+              "csName": "Stop",
+              "slot": 8,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, Asio_Error>",
+              "paramList": "nint self",
+              "argList": "self",
+              "cDecl": "ASIOError stop()"
+            },
+            {
+              "name": "getChannels",
+              "csName": "GetChannels",
+              "slot": 9,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [
+                {
+                  "name": "numInputChannels",
+                  "csType": "int*",
+                  "cType": "long*"
+                },
+                {
+                  "name": "numOutputChannels",
+                  "csType": "int*",
+                  "cType": "long*"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, int*, int*, Asio_Error>",
+              "paramList": "nint self, int* numInputChannels, int* numOutputChannels",
+              "argList": "self, numInputChannels, numOutputChannels",
+              "cDecl": "ASIOError getChannels(long* numInputChannels, long* numOutputChannels)"
+            },
+            {
+              "name": "getLatencies",
+              "csName": "GetLatencies",
+              "slot": 10,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [
+                {
+                  "name": "inputLatency",
+                  "csType": "int*",
+                  "cType": "long*"
+                },
+                {
+                  "name": "outputLatency",
+                  "csType": "int*",
+                  "cType": "long*"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, int*, int*, Asio_Error>",
+              "paramList": "nint self, int* inputLatency, int* outputLatency",
+              "argList": "self, inputLatency, outputLatency",
+              "cDecl": "ASIOError getLatencies(long* inputLatency, long* outputLatency)"
+            },
+            {
+              "name": "getBufferSize",
+              "csName": "GetBufferSize",
+              "slot": 11,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [
+                {
+                  "name": "minSize",
+                  "csType": "int*",
+                  "cType": "long*"
+                },
+                {
+                  "name": "maxSize",
+                  "csType": "int*",
+                  "cType": "long*"
+                },
+                {
+                  "name": "preferredSize",
+                  "csType": "int*",
+                  "cType": "long*"
+                },
+                {
+                  "name": "granularity",
+                  "csType": "int*",
+                  "cType": "long*"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, int*, int*, int*, int*, Asio_Error>",
+              "paramList": "nint self, int* minSize, int* maxSize, int* preferredSize, int* granularity",
+              "argList": "self, minSize, maxSize, preferredSize, granularity",
+              "cDecl": "ASIOError getBufferSize(long* minSize, long* maxSize, long* preferredSize, long* granularity)"
+            },
+            {
+              "name": "canSampleRate",
+              "csName": "CanSampleRate",
+              "slot": 12,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [
+                {
+                  "name": "sampleRate",
+                  "csType": "double",
+                  "cType": "ASIOSampleRate"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, double, Asio_Error>",
+              "paramList": "nint self, double sampleRate",
+              "argList": "self, sampleRate",
+              "cDecl": "ASIOError canSampleRate(ASIOSampleRate sampleRate)"
+            },
+            {
+              "name": "getSampleRate",
+              "csName": "GetSampleRate",
+              "slot": 13,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [
+                {
+                  "name": "sampleRate",
+                  "csType": "double*",
+                  "cType": "ASIOSampleRate*"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, double*, Asio_Error>",
+              "paramList": "nint self, double* sampleRate",
+              "argList": "self, sampleRate",
+              "cDecl": "ASIOError getSampleRate(ASIOSampleRate* sampleRate)"
+            },
+            {
+              "name": "setSampleRate",
+              "csName": "SetSampleRate",
+              "slot": 14,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [
+                {
+                  "name": "sampleRate",
+                  "csType": "double",
+                  "cType": "ASIOSampleRate"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, double, Asio_Error>",
+              "paramList": "nint self, double sampleRate",
+              "argList": "self, sampleRate",
+              "cDecl": "ASIOError setSampleRate(ASIOSampleRate sampleRate)"
+            },
+            {
+              "name": "getClockSources",
+              "csName": "GetClockSources",
+              "slot": 15,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [
+                {
+                  "name": "clocks",
+                  "csType": "Asio_ClockSource*",
+                  "cType": "ASIOClockSource*"
+                },
+                {
+                  "name": "numSources",
+                  "csType": "int*",
+                  "cType": "long*"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, Asio_ClockSource*, int*, Asio_Error>",
+              "paramList": "nint self, Asio_ClockSource* clocks, int* numSources",
+              "argList": "self, clocks, numSources",
+              "cDecl": "ASIOError getClockSources(ASIOClockSource* clocks, long* numSources)"
+            },
+            {
+              "name": "setClockSource",
+              "csName": "SetClockSource",
+              "slot": 16,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [
+                {
+                  "name": "reference",
+                  "csType": "int",
+                  "cType": "long"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, int, Asio_Error>",
+              "paramList": "nint self, int reference",
+              "argList": "self, reference",
+              "cDecl": "ASIOError setClockSource(long reference)"
+            },
+            {
+              "name": "getSamplePosition",
+              "csName": "GetSamplePosition",
+              "slot": 17,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [
+                {
+                  "name": "sPos",
+                  "csType": "Asio_Samples*",
+                  "cType": "ASIOSamples*"
+                },
+                {
+                  "name": "tStamp",
+                  "csType": "Asio_TimeStamp*",
+                  "cType": "ASIOTimeStamp*"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, Asio_Samples*, Asio_TimeStamp*, Asio_Error>",
+              "paramList": "nint self, Asio_Samples* sPos, Asio_TimeStamp* tStamp",
+              "argList": "self, sPos, tStamp",
+              "cDecl": "ASIOError getSamplePosition(ASIOSamples* sPos, ASIOTimeStamp* tStamp)"
+            },
+            {
+              "name": "getChannelInfo",
+              "csName": "GetChannelInfo",
+              "slot": 18,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [
+                {
+                  "name": "info",
+                  "csType": "Asio_ChannelInfo*",
+                  "cType": "ASIOChannelInfo*"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, Asio_ChannelInfo*, Asio_Error>",
+              "paramList": "nint self, Asio_ChannelInfo* info",
+              "argList": "self, info",
+              "cDecl": "ASIOError getChannelInfo(ASIOChannelInfo* info)"
+            },
+            {
+              "name": "createBuffers",
+              "csName": "CreateBuffers",
+              "slot": 19,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [
+                {
+                  "name": "bufferInfos",
+                  "csType": "Asio_BufferInfo*",
+                  "cType": "ASIOBufferInfo*"
+                },
+                {
+                  "name": "numChannels",
+                  "csType": "int",
+                  "cType": "long"
+                },
+                {
+                  "name": "bufferSize",
+                  "csType": "int",
+                  "cType": "long"
+                },
+                {
+                  "name": "callbacks",
+                  "csType": "Asio_Callbacks*",
+                  "cType": "ASIOCallbacks*"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, Asio_BufferInfo*, int, int, Asio_Callbacks*, Asio_Error>",
+              "paramList": "nint self, Asio_BufferInfo* bufferInfos, int numChannels, int bufferSize, Asio_Callbacks* callbacks",
+              "argList": "self, bufferInfos, numChannels, bufferSize, callbacks",
+              "cDecl": "ASIOError createBuffers(ASIOBufferInfo* bufferInfos, long numChannels, long bufferSize, ASIOCallbacks* callbacks)"
+            },
+            {
+              "name": "disposeBuffers",
+              "csName": "DisposeBuffers",
+              "slot": 20,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, Asio_Error>",
+              "paramList": "nint self",
+              "argList": "self",
+              "cDecl": "ASIOError disposeBuffers()"
+            },
+            {
+              "name": "controlPanel",
+              "csName": "ControlPanel",
+              "slot": 21,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, Asio_Error>",
+              "paramList": "nint self",
+              "argList": "self",
+              "cDecl": "ASIOError controlPanel()"
+            },
+            {
+              "name": "future",
+              "csName": "Future",
+              "slot": 22,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [
+                {
+                  "name": "selector",
+                  "csType": "int",
+                  "cType": "long"
+                },
+                {
+                  "name": "opt",
+                  "csType": "void*",
+                  "cType": "void*"
+                }
+              ],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, int, void*, Asio_Error>",
+              "paramList": "nint self, int selector, void* opt",
+              "argList": "self, selector, opt",
+              "cDecl": "ASIOError future(long selector, void* opt)"
+            },
+            {
+              "name": "outputReady",
+              "csName": "OutputReady",
+              "slot": 23,
+              "csReturn": "Asio_Error",
+              "returnsVoid": false,
+              "params": [],
+              "fnPtrType": "delegate* unmanaged[Thiscall]<nint, Asio_Error>",
+              "paramList": "nint self",
+              "argList": "self",
+              "cDecl": "ASIOError outputReady()"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

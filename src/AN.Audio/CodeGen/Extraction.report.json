@@ -1,0 +1,180 @@
+{
+  "toolVersion": "AN.Audio.BindingsCompiler 0.1 (spec 71)",
+  "wantedSha256": "7e528156ab023df249b762060f3ad6c45b845561ef9b56887f0b5ff4a6c4e974",
+  "headers": [
+    {
+      "path": "common/asiosys.h",
+      "sha256": "f44a1ed0fd7c056ff047aeebc4c05a8c185f0585a24d8debc55c70107777dbef"
+    },
+    {
+      "path": "common/asio.h",
+      "sha256": "93d2f80d49b4ac9c963514e7c1307ab5111d8104246192233745beb058534ea1"
+    },
+    {
+      "path": "common/iasiodrv.h",
+      "sha256": "86ad4788452c74823653cf57d4bd557c48bb6542d7e6eb7fff80102c705a066d"
+    }
+  ],
+  "conditionalEvaluation": true,
+  "definesFromHeaders": {
+    "__asiosys__": "",
+    "PPC": "0",
+    "WINDOWS": "1",
+    "SGI": "0",
+    "SUN": "0",
+    "LINUX": "0",
+    "BEOS": "0",
+    "NATIVE_INT64": "0",
+    "IEEE754_64FLOAT": "1",
+    "__ASIO_H": "",
+    "__ASIODRIVER_FWD_DEFINED__": ""
+  },
+  "skipped": [
+    {
+      "header": "common/asio.h",
+      "line": 495,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOInit(ASIODriverInfo *info);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 523,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOExit(void);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 539,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOStart(void);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 561,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOStop(void);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 578,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOGetChannels(long *numInputChannels, long *numOutputChannels);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 590,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOGetLatencies(long *inputLatency, long *outputLatency);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 632,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOGetBufferSize(long *minSize, long *maxSize, long *preferredSize, long *granularity);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 653,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOCanSampleRate(ASIOSampleRate sampleRate);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 662,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOGetSampleRate(ASIOSampleRate *currentRate);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 673,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOSetSampleRate(ASIOSampleRate sampleRate);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 696,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOGetClockSources(ASIOClockSource *clocks, long *numSources);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 729,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOSetClockSource(long index);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 748,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOGetSamplePosition (ASIOSamples *sPos, ASIOTimeStamp *tStamp);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 785,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOGetChannelInfo(ASIOChannelInfo *info);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 831,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOCreateBuffers(ASIOBufferInfo *bufferInfos, long numChannels, long bufferSize, ASIOCallbacks *callbacks);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 864,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIODisposeBuffers(void);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 876,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOControlPanel(void);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 894,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOFuture(long selector, void *params);"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 1016,
+      "reason": "unsupported declaration: unknown identifier 'sizeof' in constant expression",
+      "preview": "typedef struct ASIOIoFormat_s { ASIOIoFormatType FormatType; char future[512-sizeof(ASIOIoFormatType)];"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 1020,
+      "reason": "unrecognised top-level declaration",
+      "preview": "} ASIOIoFormat;"
+    },
+    {
+      "header": "common/asio.h",
+      "line": 1031,
+      "reason": "function prototype (C-API layer, not bound)",
+      "preview": "ASIOError ASIOOutputReady(void);"
+    },
+    {
+      "header": "common/iasiodrv.h",
+      "line": 17,
+      "reason": "#include not followed (headers are ordered by the wanted list)",
+      "preview": "include \"asiosys.h\""
+    },
+    {
+      "header": "common/iasiodrv.h",
+      "line": 18,
+      "reason": "#include not followed (headers are ordered by the wanted list)",
+      "preview": "include \"asio.h\""
+    },
+    {
+      "header": "common/iasiodrv.h",
+      "line": 24,
+      "reason": "unsupported declaration: forward `typedef interface` (not needed)",
+      "preview": "typedef interface IASIO IASIO;"
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

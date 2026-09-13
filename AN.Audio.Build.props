@@ -17,6 +17,11 @@
   <PropertyGroup>
     <!-- ── Dependency versions (edit here, all projects pick them up) ── -->
     <ANCodeAnalyzersVersion>0.1.29</ANCodeAnalyzersVersion>
+    <!-- Spec 71 bindings compiler (build-only tool + template task). Same floors FluidUI pins. -->
+    <ANYeetCodeVersion>[0.260706.133748,)</ANYeetCodeVersion>
+    <ANYeetJsonVersion>[0.260706.133749,)</ANYeetJsonVersion>
+    <!-- EXACT pin: AN.Audio.csproj imports this package's build/*.targets by path for the outer multi-TFM build (NuGet only auto-imports per TFM). -->
+    <ANYeetCodeMsBuildVersion>0.260706.133754</ANYeetCodeMsBuildVersion>
   </PropertyGroup>
 
   <PropertyGroup>
