@@ -141,6 +141,30 @@ dotnet run --project tests/SimpleMidiTest -- --captureDuration 30   # capture fo
 | macOS | CoreMIDI (C API via PInvoke; OS hot-plug notifications; `MIDISendSysex` for identity) | ✅ Working (input, MIDI 1.0 byte path; UMP receive planned) |
 | Linux | ALSA rawmidi (`/dev/snd/midiC*D*` via libc, no `libasound`; every USB cable is a port; identity request via the same node) | ✅ Working (input; no driver timestamps — `DeliveryLagMs` reads 0; ALSA sequencer backend planned for that) |
 
+## Per-App Level Metering (which app is making sound?)
+
+`ArtificialNecessity.Audio.AppMeter` (`AN.Audio.AppMeter.dll`), independent of the other packages. Answers "which process is emitting audio right now, and how loud" through the OS's own per-session meters — no PCM is copied. Origin: the 2017 SoundLevelMonitor; consumer: AN.Monitor's "what dinged" stat.
+
+```csharp
+using AN.Audio.AppMeter;
+
+using var meter = AudioAppMeter.Create(new AudioAppMeter_Options { PollIntervalMs = 100 });
+var rows = new AudioAppMeter_Sample[64];
+int n = meter.ReadSessions(rows);            // each row's Peak = max since YOUR previous read (the library polls fast so you don't have to)
+foreach (var r in rows.AsSpan(0, n))
+    if (!r.Peak.IsSilent) Console.WriteLine($"pid {r.ProcessId.Value} {r.Peak.Value:F2} {r.State} {r.Flags}");
+```
+
+Rows are blittable (`SessionId`, `EndpointId`, `ProcessId`, `Peak`, `State`, `Flags { SystemSounds, Unattributed, Muted }`); names are not in the row — map pid → exe yourself (`LookupDisplayName` returns the OS string, which is empty for most apps). A process playing to two devices appears twice (distinct `EndpointId`); aggregate by pid. `SessionsChanged` fires on a background thread when an app starts or stops having a session.
+
+Try it: `cmd\test-appmeter.cmd --duration 30` prints the top sessions by peak with process names.
+
+| Platform | Backend | Status |
+|----------|---------|--------|
+| Windows | WASAPI audio sessions — one `IAudioSessionManager2` per active render endpoint, `IAudioMeterInformation::GetPeakValue` per session, `IAudioSessionNotification` for arrivals | ✅ Working (live-validated) |
+| Linux | libpulse `PA_STREAM_PEAK_DETECT` monitor streams per sink-input (PipeWire via `pipewire-pulse`) | 🔲 Planned (spec 80 Phase 2) |
+| macOS | process taps (14.2+) — metering IS capture there | 🔲 `Capability.None` / `NotImplemented` stub until spec 81 |
+
 ## Building
 
 ```
@@ -154,7 +178,7 @@ $env:LOCAL_NUGET_REPO = "C:\path\to\local\feed"
 cmd\publish-local.cmd            # or: dotnet run --file cmd/publish-local.cs
 ```
 
-This builds, packs every package (`ArtificialNecessity.Audio.Common`, `.Audio`, `.Audio.Midi`, `.Audio.Formats`), and deploys the `.nupkg` files to your local feed with one shared version. Versioning is automatic (timestamp-based).
+This builds, packs every package (`ArtificialNecessity.Audio.Common`, `.Audio`, `.Audio.Midi`, `.Audio.Formats`, `.Audio.AppMeter`), and deploys the `.nupkg` files to your local feed with one shared version. Versioning is automatic (timestamp-based).
 
 ## Project Structure
 

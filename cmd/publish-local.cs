@@ -55,7 +55,7 @@ string repoRoot = FindRepoRoot(Directory.GetCurrentDirectory())
     ?? Fail("Cannot find repo root (looked for AN.Audio.Build.props walking up from cwd)");
 
 string solutionPath   = Path.Combine(repoRoot, "AN.Audio.slnx");
-string[] PackageIds   = ["ArtificialNecessity.Audio.Common", "ArtificialNecessity.Audio", "ArtificialNecessity.Audio.Midi", "ArtificialNecessity.Audio.Formats"];
+string[] PackageIds   = ["ArtificialNecessity.Audio.Common", "ArtificialNecessity.Audio", "ArtificialNecessity.Audio.Midi", "ArtificialNecessity.Audio.Formats", "ArtificialNecessity.Audio.AppMeter"];
 
 // ── LOCAL_NUGET_REPO ────────────────────────────────────────────────────────────────
 string? localNuGetFeedPath = Environment.GetEnvironmentVariable("LOCAL_NUGET_REPO");

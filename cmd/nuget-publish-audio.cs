@@ -43,7 +43,7 @@ string? apiKey          = Environment.GetEnvironmentVariable("NUGET_API_KEY");
 const string NuGetSource = "https://api.nuget.org/v3/index.json";
 // Dependency order: Common FIRST so a consumer restoring Audio/Formats never sees a dangling dependency on the feed.
 // Keep in sync with the IsPackable projects in AN.Audio.slnx (and the list in cmd/publish-local.cs).
-string[] packageIds     = ["ArtificialNecessity.Audio.Common", "ArtificialNecessity.Audio", "ArtificialNecessity.Audio.Midi", "ArtificialNecessity.Audio.Formats"];
+string[] packageIds     = ["ArtificialNecessity.Audio.Common", "ArtificialNecessity.Audio", "ArtificialNecessity.Audio.Midi", "ArtificialNecessity.Audio.Formats", "ArtificialNecessity.Audio.AppMeter"];
 
 var stamp = BuildStamp.Now();
 string[] expectedPackages = packageIds.Select(id => Path.Combine(releaseOutputDir, $"{id}.{stamp.PackageVersion}.nupkg")).ToArray();

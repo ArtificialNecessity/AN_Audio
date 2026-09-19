@@ -11,6 +11,7 @@ Cross-platform audio for .NET via direct PInvoke to the OS audio APIs — PCM ou
 | **ArtificialNecessity.Audio** | `AN.Audio` | PCM output through WASAPI shared/exclusive or **ASIO** (Windows), AudioQueue (macOS), ALSA (Linux). One callback fills the device buffer; device enumeration, default-follow and hot-switch recovery included; low-latency modes report the period/latency they actually got. | `.Audio.Common` |
 | **ArtificialNecessity.Audio.Midi** | `AN.Audio.Midi` | MIDI input via WinMM `midiIn*` (macOS/Linux planned). Opens every port, merges them into one lock-free ring, hot-plug aware. MIDI 2.0-ready message contract. | nothing |
 | **ArtificialNecessity.Audio.Formats** | `AN.Audio.Formats` | Decodes **WAV** (PCM 8/16/24/32, float 32/64, EXTENSIBLE, `smpl`/`cue`/`LIST` metadata) and **FLAC** (with seeking, tags, MD5 verify) from any `Stream`, including forward-only network streams. MP3 next. 100 % managed. | `.Audio.Common` |
+| **ArtificialNecessity.Audio.AppMeter** | `AN.Audio.AppMeter` | **Which process is making sound, and how loud.** Per-application peak meters via WASAPI audio sessions (Windows; libpulse planned, macOS stub). Own poll thread, max-since-your-last-read semantics, blittable rows. | nothing |
 | **ArtificialNecessity.Audio.Common** | `AN.Audio` | The shared PCM vocabulary the packages above speak: `AudioFormat`, `SampleFormat`, `AudioChannelMask`, `AudioBufferView`, `AudioSampleConvert`. Pulled in transitively; reference it directly only if you need the types without the rest. | nothing |
 
 All packages target `net8.0`, `net9.0` and `net10.0` and share one version number per release.
@@ -21,6 +22,7 @@ All packages target `net8.0`, `net9.0` and `net10.0` and share one version numbe
 <PackageReference Include="ArtificialNecessity.Audio"         Version="*" />   <!-- playback -->
 <PackageReference Include="ArtificialNecessity.Audio.Midi"    Version="*" />   <!-- MIDI input -->
 <PackageReference Include="ArtificialNecessity.Audio.Formats" Version="*" />   <!-- WAV / FLAC decoding -->
+<PackageReference Include="ArtificialNecessity.Audio.AppMeter" Version="*" />  <!-- per-app level metering -->
 ```
 
 Reference only what you use — the packages are independent.
@@ -91,6 +93,39 @@ while (midi.Ring.TryDequeue(out var m))
 | -------- | ------- | ------ |
 | Windows | WinMM `midiIn*` (legacy stack and Windows MIDI Services) | ✅ input; identity request is the only output |
 | macOS / Linux | CoreMIDI / ALSA seq | planned |
+
+## ArtificialNecessity.Audio.AppMeter — which app is making sound?
+
+Per-application output level metering: every process with an audio session, its pid, and how loud it is (peak 0..1) — without touching PCM.
+Built for resident monitors that want to know *what just dinged*.
+
+```csharp
+using AN.Audio.AppMeter;
+
+using var meter = AudioAppMeter.Create();               // starts its own 100 ms poll thread; throws AudioAppMeter_UnavailableException where unsupported
+meter.SessionsChanged += () => Console.WriteLine("an app started or stopped playing");
+
+var rows = new AudioAppMeter_Sample[64];
+while (true)
+{
+    Thread.Sleep(2000);                                  // poll at ANY cadence…
+    int n = meter.ReadSessions(rows);                    // …each Peak is the MAX since your previous read, so short dings are never missed
+    foreach (var r in rows.AsSpan(0, n))
+        if (!r.Peak.IsSilent)
+            Console.WriteLine($"pid {r.ProcessId.Value} peak {r.Peak.Value:F2} {r.Flags}");   // pid → exe is yours (Process.GetProcessById)
+}
+```
+
+- `AudioAppMeter_Sample` is blittable: `SessionId`, `EndpointId`, `ProcessId` (0 + `Unattributed` when the OS can't say), `Peak`, `State` (`Active`/`Inactive`/`Expired`), `Flags` (`SystemSounds`, `Unattributed`, `Muted`).
+- Meters what the app **emits**: after the app's own session volume/mute, before master volume. All active render endpoints by default (`AudioAppMeter_Options.Scope`); a process on two devices appears twice — aggregate by pid.
+- `ReadMasterPeak()` gives the default endpoint's peak the same max-since-read way. `LookupDisplayName(id)` returns the OS display name (usually empty for real apps — map pid → exe yourself).
+- `AudioAppMeter.IsAvailable` / `Capability` cost nothing; `CreateOrNull()` never throws.
+
+| Platform | Backend | Status |
+| -------- | ------- | ------ |
+| Windows | WASAPI audio sessions (`IAudioSessionManager2` + `IAudioMeterInformation` per session) | ✅ |
+| Linux | libpulse `PA_STREAM_PEAK_DETECT` monitor streams (PipeWire via `pipewire-pulse`) | planned |
+| macOS | process taps (14.2+) — metering there requires capturing PCM | `Capability.None` stub |
 
 ## ArtificialNecessity.Audio.Formats — WAV / FLAC decoding
 

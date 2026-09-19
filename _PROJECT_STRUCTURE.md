@@ -49,13 +49,16 @@ AN.Audio.slnx                                 — Solution (slnx format)
 ├── src/AN.Audio/                             — PCM output + output-device management (WASAPI / AudioQueue / ALSA)
 ├── src/AN.Audio.Midi/                        — MIDI input (WinMM / CoreMIDI / ALSA rawmidi), MIDI 2.0-ready message contract; NO dependency on AN.Audio or Common
 ├── src/AN.Audio.Formats/                     — Format decoding: IAudioDecoder facade, Wav/, Flac/, (Mp3/ Phase 3); depends only on Common
+├── src/AN.Audio.AppMeter/                    — Per-application output metering (WASAPI audio sessions; libpulse planned; mac stub) — spec 80; NO dependency on AN.Audio or Common
 ├── tests/AN.Audio.Common.Tests/              — xunit: sample conversion, buffer view, channel mask
 ├── tests/AN.Audio.Tests/                     — xunit: sinc resampler
 ├── tests/AN.Audio.Midi.Tests/                — xunit: message decode, ring, SysEx, byte-stream parser, interop struct layout (WinMM/CoreMIDI self-skip off-OS)
 ├── tests/AN.Audio.Formats.Tests/             — xunit: sniff, PeekableStream, WAV (synthesised), FLAC (fixtures), Local files
+├── tests/AN.Audio.AppMeter.Tests/            — xunit: SessionTable semantics, WASAPI IID/vtable constants, our COM notification object, factory capability
 ├── tests/SimpleAudioTest/                    — console smoke: plays a WAV through the real device (manual)
 ├── tests/SimpleMidiTest/                     — console smoke: real MIDI ports, hot-plug, identity; auto-exits after --captureDuration (default 10 s) (cmd/test-midi.cmd|.sh)
-├── cmd/                                      — publish-local.cs / nuget-publish-audio.cs (+ .cmd runners), test-midi.cmd / test-midi.sh
+├── tests/SimpleAppMeterTest/                 — console smoke: top-N sessions by peak with pid → process name (cmd/test-appmeter.cmd)
+├── cmd/                                      — publish-local.cs / nuget-publish-audio.cs (+ .cmd runners), test-midi.cmd / test-midi.sh, test-appmeter.cmd
 ├── AN.Audio.Build.props                      — imported by EVERY csproj: timestamp versioning v2, analyzers, artifacts/ paths, LocalNuGet deploy target
 ├── AssetSource/cartesia_tts_test.wav         — our WAV master for fixtures
 ├── _SPECS/                                   — design specs (numbered feature areas) + IMPL checklists
@@ -63,9 +66,9 @@ AN.Audio.slnx                                 — Solution (slnx format)
 ```
 
 Packages (one per library project, all `IsPackable`, one shared timestamp version per publish):
-`ArtificialNecessity.Audio.Common`, `ArtificialNecessity.Audio`, `ArtificialNecessity.Audio.Midi`, `ArtificialNecessity.Audio.Formats`.
+`ArtificialNecessity.Audio.Common`, `ArtificialNecessity.Audio`, `ArtificialNecessity.Audio.Midi`, `ArtificialNecessity.Audio.Formats`, `ArtificialNecessity.Audio.AppMeter`.
 **Packaging rule (spec 30 D27 as amended by spec 50 D15):** no umbrella project; no inter-project references EXCEPT to `AN.Audio.Common`,
-and only from projects that need a PCM type (Audio, Formats — not Midi).
+and only from projects that need a PCM type (Audio, Formats — not Midi, not AppMeter).
 
 ### Subproject Descriptions
 
@@ -121,6 +124,14 @@ and only from projects that need a PCM type (Audio, Formats — not Midi).
     `Mp3_FrameReader.cs` (`Mp3_Frame : IMpegFrame` reused per frame; sync/resync with second-header confirmation, ID3 tags anywhere skipped, header-only mode for the seek index, `EndedShort`),
     `Mp3_Decoder.cs` (`NativeFormat = Float32`; gapless trim with the LAME/ffmpeg rule delay+529 / padding−529 so the output is time-aligned and exactly the source length; frame-offset index + pre-roll seek bit-identical to linear; `TotalFrames` from Xing/VBRI or a header scan when seekable; `CorruptFrames`; `Mp3_DecoderOptions { OnPicture, ReadId3v1 }`),
     `Mp3_Id3v2.cs` (ID3v2.2/2.3/2.4 + ID3v1 → `Mp3_Id3Tags`; APIC/PIC to the callback or skipped, `PictureCount` always), `Mp3_StreamInfo.cs` (`Mp3_StreamInfo`, `Mp3_GaplessInfo`, `Mp3_MpegVersion/Layer/ChannelMode`).
+- `src/AN.Audio.AppMeter/` (`ArtificialNecessity.Audio.AppMeter`, namespace `AN.Audio.AppMeter`) — **spec 80**: per-application output level metering — *which process is making sound, how loud*. Independent (no AN.Audio/Common reference).
+  - `IAudioAppMeter.cs` — `Capability`, `UnavailableReason`, `ReadSessions(Span<AudioAppMeter_Sample>)` (max-since-previous-read, reset on read — D3), `ReadMasterPeak()`, `LookupDisplayName(id)`, `SessionsChanged` (background thread, coalesced).
+  - `AudioAppMeter.cs` — factory: `IsAvailable`, `Capability`, `UnavailableReason` (OS identity only, no handles), `Create` (throws `AudioAppMeter_UnavailableException` where Capability is None), `CreateOrNull`.
+  - `AudioAppMeter_Types.cs` — blittable `AudioAppMeter_Sample(SessionId, EndpointId, ProcessId, Peak, State, Flags)`, branded ids (`_SessionId`, `_EndpointId`, `_ProcessId`, `_Peak`), `_Capability`, `_UnavailableReason`, `_Scope`, `_SessionState`, `_SessionFlags { SystemSounds, Unattributed, Muted }`, `_Options { Scope, PollIntervalMs = 100, ReenumerateIntervalMs = 5000, PulsePeakRateHz }`.
+  - `Internal/AppMeter_SessionTable.cs` — platform-neutral D3/D5 bookkeeping: `BeginPoll / Observe / EndPoll` from the backend, `ReadAndReset` from the consumer; two-strike expiry; membership-change flag; `Fnv1a64` for the branded ids. `Internal/NullAppMeter.cs` — the Capability.None meter.
+  - `Platforms/Windows/` — `Wasapi_AppMeterInterop.cs` (copy of the MMDevice consts/wrappers + `IAudioSessionManager2`/`Enumerator`/`Control2`/`IAudioMeterInformation`/`ISimpleAudioVolume` vtables; OUR `IAudioSessionNotification` as a native object: static vtable of `[UnmanagedCallersOnly]` statics + weak GCHandle owner slot),
+    `Wasapi_AppMeter.cs` (own MTA poll thread `BelowNormal`; one session manager per active render endpoint (D4) or default only; cached AddRef'd session graph, rebuilt on notification or every 5 s (D5); per-poll `GetState`/`GetPeakValue`/`GetMute` fold; ALL COM on the poll thread — consumer reads cached state).
+  - `Platforms/MacOS/CoreAudioTap_AppMeter.cs` — Phase 3 stub: `NotImplemented` (process taps = capture → spec 81). Linux libpulse: Phase 2, not started.
 
 **Tests:**
 - `tests/AN.Audio.Common.Tests/` — `AudioFormatTests.cs`, `AudioSampleConvertTests.cs` (exact round-trips, saturation, Int24 sign extension, UInt8 bias).
@@ -131,7 +142,9 @@ and only from projects that need a PCM type (Audio, Formats — not Midi).
 - `tests/AN.Audio.Formats.Tests/` — `SniffTests`, `PeekableStreamTests`, `WavDecoderTests` (every case seekable AND through `Support/ForwardOnlyStream` with 1–97-byte reads), `WavG711Tests`, `WavRf64W64Tests`,
   `FlacDecoderTests` (bit-exact vs WAV master, MD5, tags, truncation, seek), `Mp3DecoderTests` (exact length vs master, time alignment, tags, picture callback, seek == linear, D13), `LocalFileTests` (`Category=Local`: `clap-808.wav`, Salamander `A0v3.flac`).
   `Support/Wav_TestWriter.cs` synthesises every WAV shape in memory (RIFF, RF64/BW64, Wave64); `Support/Mp3_TestTagWriter.cs` synthesises ID3v2 tags; `Support/FlacFixtureTools.cs` splices SEEKTABLEs / zeroes totals; `Fixtures/` holds ffmpeg-rendered FLAC/MP3/WAV + `README.md` provenance.
-- `tests/SimpleAudioTest/`, `tests/SimpleMidiTest/` — manual console smoke tests against real hardware.
+- `tests/AN.Audio.AppMeter.Tests/` — `AppMeter_SessionTableTests` (max-since-read, reset, two-strike expiry, coalesced membership change, FNV-1a vectors), `Wasapi_AppMeterInteropTests` (IIDs/vtable slots/HRESULTs vs header text,
+  our `IAudioSessionNotification` object round-tripped through its own vtable, factory capability per OS, live enumerate on Windows).
+- `tests/SimpleAudioTest/`, `tests/SimpleMidiTest/`, `tests/SimpleAppMeterTest/` — manual console smoke tests against real hardware (`cmd/test-appmeter.cmd`: top-N sessions by peak, pid → process name).
 
 ## Dependency policy — managed only, no unsafe code paths
 
@@ -169,11 +182,14 @@ Numbered by feature area; a `*_IMPL.md` beside a design spec is its build checkl
 - `60_Low_Latency_Output.md` — **DRAFT.** `AudioOutputOptions.Latency = LowLatency` on all three platforms: Windows `IAudioClient3::InitializeSharedAudioStream` at the engine minimum period + MMCSS "Pro Audio" (Phase A, in progress); Linux explicit `hw_params` period + `SCHED_FIFO` (+ rtkit later); macOS AUHAL render callback replacing AudioQueue; new `IAudioOutput.PeriodFrames / LatencyModeActual / LatencyFallbackReason / UnderrunCount`. Driven by MusicStudio's measured key→sound budget (its spec Bringup/18).
 - `70_Asio_Output.md` — **BUILT (Phases 1–4), hardware-validated on the MOTU M4: 128 frames → 3.5 ms, 32 frames → 1.6 ms, panel resets and hot-unplug handled.** Optional `AudioOutput_Backend { Auto, Wasapi, Asio }`; ASIO drivers as `asio:{CLSID}` devices; STA host thread + hidden HWND; preferred buffer size; per-channel sample types; planar writer; reset protocol. MOTU M4 probed live (Int32LSB, preferred 128, 3.46 ms).
 - `71_CHeader_Bindings_Autogen.md` — **BUILT.** The header→C# bindings compiler (see `src/AN.Audio/BindingsCompiler`): pipeline, D1–D8, §5 layout table, §9 as-built deviations and MSVC probe evidence.
+- `80_AppMeter_PerApp_Levels.md` — **BUILT Phase 0 + 1 (Windows) + 3 (mac stub).** `AN.Audio.AppMeter`: which process is making sound and how loud. D1–D7 design, D8–D13 build-time decisions
+  (100 ms poll option, no default-device tracking, `EndpointId` in the sample, raw display names). Phase 2 (Linux libpulse) open. Origin: the 2017 `SoundLevelMonitor`; consumer: AN.Monitor's "what is dinging" stat.
 
 ## External API notes: _EXTERNAL_APIS/
 
 One file per API, quoting the header/source actually read, with the version/commit: `WinMM_MidiIn.md`, `UMP_MIDI2_Format.md`,
-`WaveFormatExtensible_ChannelMask.md` (`SPEAKER_*`, `KSDATAFORMAT_SUBTYPE_*`), `SimpleFlac_FlacDecoder.md`, `NLayer_MpegFile.md`, `WASAPI_IAudioClient3_MMCSS.md` (IAudioClient2/3 vtable, IIDs, `AUDCLNT_E_*`, `avrt.dll`), `ASIO_IASIO.md` (IASIO vtable, pack(4) layouts, licence position, MOTU M4 live probe).
+`WaveFormatExtensible_ChannelMask.md` (`SPEAKER_*`, `KSDATAFORMAT_SUBTYPE_*`), `SimpleFlac_FlacDecoder.md`, `NLayer_MpegFile.md`, `WASAPI_IAudioClient3_MMCSS.md` (IAudioClient2/3 vtable, IIDs, `AUDCLNT_E_*`, `avrt.dll`), `ASIO_IASIO.md` (IASIO vtable, pack(4) layouts, licence position, MOTU M4 live probe),
+`WASAPI_AudioSessions_Metering.md` (`IAudioSessionManager2` / `IAudioSessionControl2` / `IAudioMeterInformation` / `ISimpleAudioVolume` vtables + IIDs, `AUDCLNT_S_NO_SINGLE_PROCESS`, meter semantics).
 Rule 2 of the overview: read the SDK header, not the blog post.
 
 ## Architecture Patterns
@@ -216,5 +232,6 @@ checkbox ticked, commit (multi-line messages via here-string piped to `git commi
 | Output device mgmt | ✅ all three |
 | MIDI input | ✅ Windows WinMM (hardware-validated); macOS/Linux planned |
 | Formats | ✅ WAV incl. A-law/µ-law, RF64/BW64, Wave64 (Phases 1, 4a, 4c), ✅ FLAC incl. seeking (Phase 2), ✅ MP3 with exact seek + picture callback (Phase 3, NLayer 3.0.0 as frame decoder only), ◻ AIFF / Ogg (Phase 4) |
+| Per-app metering (spec 80) | ✅ Windows WASAPI sessions (live-validated: player process seen at 0.98 peak within one poll, SessionsChanged fired); ◻ Linux libpulse (Phase 2); macOS = NotImplemented stub until spec 81 |
 | Capture / MIDI output | ◻ planned, interfaces shaped |
-| Tests | 390 (Common 21, Audio 71, Midi 137, Formats 161) |
+| Tests | 407 (Common 21, Audio 71, Midi 137, Formats 161, AppMeter 17) |

@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="$(MSBuildThisFileDirectory)../../AN.Audio.Build.props" />
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>AN.Audio.AppMeter</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>ArtificialNecessity.Audio.AppMeter</PackageId>
+    <Description>Per-application output level metering (which process is making sound, and how loud) via direct COM/PInvoke to OS audio session APIs: WASAPI audio sessions (Windows); libpulse and macOS process taps planned. Zero native dependencies. Independent of ArtificialNecessity.Audio.</Description>
+    <PackageReadmeFile>README-nuget.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+    <PackageProjectUrl>https://github.com/ArtificialNecessity/AN_Audio</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ArtificialNecessity/AN_Audio</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <Authors>David Jeske</Authors>
+    <Copyright>(C)opyright David Jeske 2026</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AN.Audio.AppMeter.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../../README-nuget.md" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)../../LICENSE.txt" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>

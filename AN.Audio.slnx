@@ -4,6 +4,7 @@
     <Project Path="src/AN.Audio/AN.Audio.csproj" />
     <Project Path="src/AN.Audio.Midi/AN.Audio.Midi.csproj" />
     <Project Path="src/AN.Audio.Formats/AN.Audio.Formats.csproj" />
+    <Project Path="src/AN.Audio.AppMeter/AN.Audio.AppMeter.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SimpleAudioTest/SimpleAudioTest.csproj" />
@@ -12,5 +13,7 @@
     <Project Path="tests/AN.Audio.Formats.Tests/AN.Audio.Formats.Tests.csproj" />
     <Project Path="tests/SimpleMidiTest/SimpleMidiTest.csproj" />
     <Project Path="tests/AN.Audio.Midi.Tests/AN.Audio.Midi.Tests.csproj" />
+    <Project Path="tests/SimpleAppMeterTest/SimpleAppMeterTest.csproj" />
+    <Project Path="tests/AN.Audio.AppMeter.Tests/AN.Audio.AppMeter.Tests.csproj" />
   </Folder>
 </Solution>

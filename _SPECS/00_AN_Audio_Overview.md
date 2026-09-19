@@ -1,7 +1,7 @@
 # 00 — AN.Audio: what this library is
 
 - **Status:** Living document (update when scope changes)
-- **Packages:** one per feature area — `ArtificialNecessity.Audio` (`AN.Audio.dll`), `ArtificialNecessity.Audio.Midi` (`AN.Audio.Midi.dll`), `ArtificialNecessity.Audio.Formats` (`AN.Audio.Formats.dll`), future `ArtificialNecessity.Audio.Capture`; plus the shared vocabulary `ArtificialNecessity.Audio.Common` (`AN.Audio.Common.dll`, spec 50 D15) that Audio and Formats depend on
+- **Packages:** one per feature area — `ArtificialNecessity.Audio` (`AN.Audio.dll`), `ArtificialNecessity.Audio.Midi` (`AN.Audio.Midi.dll`), `ArtificialNecessity.Audio.Formats` (`AN.Audio.Formats.dll`), `ArtificialNecessity.Audio.AppMeter` (`AN.Audio.AppMeter.dll`, spec 80), future `ArtificialNecessity.Audio.Capture`; plus the shared vocabulary `ArtificialNecessity.Audio.Common` (`AN.Audio.Common.dll`, spec 50 D15) that Audio and Formats depend on
 - **Repo:** https://github.com/ArtificialNecessity/AN_Audio — Apache 2.0
 
 ## Goal
@@ -34,6 +34,7 @@ operating system's audio stack.
 | MIDI device mgmt | `IMidiInput_DeviceManager` | ✅ 1 s poll + `NotifyDeviceChange()` host hook; library `WM_DEVICECHANGE` window in Sprint 2 | ◻ `MIDINotifyProc` | ◻ seq announce port | ◻ | ◻ | `30_MidiInput.md` |
 | MIDI 2.0 / UMP | same interfaces, richer message struct | ◻ Windows MIDI Services SDK | ◻ CoreMIDI UMP | ◻ ALSA UMP | ◻ | ◻ | later |
 | **Format decoding** (no OS API) | `IAudioDecoder` / `AudioDecoder.Open` + `Wav_Decoder`, `Flac_Decoder`, `Mp3_Decoder` | pure managed — identical everywhere | | | | | `50_Audio_Formats.md` |
+| **Per-app output metering** | `IAudioAppMeter` / `AudioAppMeter` | ✅ WASAPI audio sessions (`IAudioMeterInformation` per session, every render endpoint) | ◻ `NotImplemented` stub — process taps = capture, spec 81 | ◻ libpulse `PEAK_DETECT` monitor streams (Phase 2) | ◻ | ◻ | `80_AppMeter_PerApp_Levels.md` |
 
 ✅ implemented   ◻ planned, interface shaped for it. **Audio capture is in scope**; it has simply not been sprinted yet.
 Earlier documents said "playback only" — that was sprint scope, not library scope.
@@ -76,6 +77,7 @@ AN_Audio/
 │   └── Platforms/{Windows,MacOS,Linux,Android,iOS}/
 ├── src/AN.Audio.Midi/           MIDI in/out — SAME layout: Internal/, Platforms/…
 ├── src/AN.Audio.Formats/        format decoding (WAV, FLAC, MP3) — pure managed, no OS API: Wav/, Flac/, Mp3/, Internal/ (spec 50)
+├── src/AN.Audio.AppMeter/       per-application output metering — SAME layout: Internal/, Platforms/{Windows,MacOS}/ (spec 80)
 ├── tests/AN.Audio.Common.Tests/ xunit: sample conversion, buffer view
 ├── tests/AN.Audio.Tests/        xunit, hardware-free
 ├── tests/AN.Audio.Midi.Tests/   xunit, hardware-free (interop layout, ring, parsers)
@@ -88,7 +90,7 @@ AN_Audio/
 
 **Packaging rule (spec 30 D27, amended by spec 50 D15):** one NuGet package per feature-area project, each independent —
 `ArtificialNecessity.Audio` (`src/AN.Audio`), `ArtificialNecessity.Audio.Midi` (`src/AN.Audio.Midi`), `ArtificialNecessity.Audio.Formats`
-(`src/AN.Audio.Formats`), future `ArtificialNecessity.Audio.Capture`. No umbrella project; **no inter-project references EXCEPT to
+(`src/AN.Audio.Formats`), `ArtificialNecessity.Audio.AppMeter` (`src/AN.Audio.AppMeter`, spec 80), future `ArtificialNecessity.Audio.Capture`. No umbrella project; **no inter-project references EXCEPT to
 `ArtificialNecessity.Audio.Common`** (`src/AN.Audio.Common`), the minimum shared PCM vocabulary, referenced only by projects that
 need a PCM type (Audio, Formats — not Midi). `cmd/publish-local.cs` packs the solution with one shared timestamp version, so the
 Common dependency is always pinned to the same stamp.
